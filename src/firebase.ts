@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import { getAuth } from 'firebase/auth';
 import { initializeFirestore, getFirestore, doc, getDocFromServer, Firestore, setLogLevel } from 'firebase/firestore';
-import firebaseConfig from '../firebase-applet-config.json';
+import baseFirebaseConfig from '../firebase-applet-config.json';
 
 // Silence internal SDK WebChannel transient connection warnings so benign connection negotiation does not trigger console errors
 try {
@@ -10,14 +10,26 @@ try {
   // Ignore if already configured
 }
 
+// Allow environment variable overrides for custom hosting deployments (e.g., Vercel: winxbet-indol-ten.vercel.app)
+const metaEnv = (typeof import.meta !== 'undefined' && (import.meta as any).env) ? (import.meta as any).env : {};
+
+const firebaseConfig = {
+  projectId: metaEnv.VITE_FIREBASE_PROJECT_ID || baseFirebaseConfig.projectId,
+  appId: metaEnv.VITE_FIREBASE_APP_ID || baseFirebaseConfig.appId,
+  apiKey: metaEnv.VITE_FIREBASE_API_KEY || baseFirebaseConfig.apiKey,
+  authDomain: metaEnv.VITE_FIREBASE_AUTH_DOMAIN || baseFirebaseConfig.authDomain,
+  firestoreDatabaseId: metaEnv.VITE_FIREBASE_FIRESTORE_DATABASE_ID || baseFirebaseConfig.firestoreDatabaseId,
+  storageBucket: metaEnv.VITE_FIREBASE_STORAGE_BUCKET || baseFirebaseConfig.storageBucket,
+  messagingSenderId: metaEnv.VITE_FIREBASE_MESSAGING_SENDER_ID || baseFirebaseConfig.messagingSenderId,
+  measurementId: metaEnv.VITE_FIREBASE_MEASUREMENT_ID || baseFirebaseConfig.measurementId,
+  oAuthClientId: metaEnv.VITE_FIREBASE_OAUTH_CLIENT_ID || baseFirebaseConfig.oAuthClientId,
+};
+
 const app = getApps().length === 0 ? initializeApp(firebaseConfig) : getApp();
 
 export const auth = getAuth(app);
 
-// Use initializeFirestore with experimentalForceLongPolling and useFetchStreams: false.
-// In containerized and proxy-routed preview environments, standard WebChannel streams can fail,
-// causing "Could not reach Cloud Firestore backend [code=unavailable]".
-// Forcing long-polling without fetch streaming provides immediate, reliable HTTP connectivity without stream timeouts.
+// Use initializeFirestore with long-polling fallback for maximum compatibility across preview proxies and production Vercel HTTPS
 let firestoreInstance: Firestore;
 try {
   firestoreInstance = initializeFirestore(

@@ -5,7 +5,7 @@ import { SupportCategory, SupportMessage, SupportTicket } from '../types';
 import { triggerHaptic } from '../utils/haptics';
 import { playClickSound, playWinSound } from '../utils/audio';
 import { db } from '../firebase';
-import { collection, addDoc, doc, setDoc, getDocs, query, orderBy, limit } from 'firebase/firestore';
+import { collection, addDoc, doc, setDoc, getDocs, query, orderBy, limit, onSnapshot, where } from 'firebase/firestore';
 import { 
   Headphones, 
   X, 
@@ -170,6 +170,45 @@ export const CustomerSupportModal: React.FC<CustomerSupportModalProps> = ({
       console.warn('Failed to save tickets to localStorage', err);
     }
   }, [myTickets]);
+
+  // Real-time Firestore sync so user immediately sees Admin solutions and replies
+  useEffect(() => {
+    if (!db || !user?.uid) return;
+    try {
+      const q = query(
+        collection(db, 'supportTickets'),
+        where('userId', '==', user.uid),
+        orderBy('createdAt', 'desc'),
+        limit(25)
+      );
+
+      const unsub = onSnapshot(q, (snapshot) => {
+        if (!snapshot.empty) {
+          const cloudTickets: SupportTicket[] = [];
+          snapshot.forEach((docSnap) => {
+            cloudTickets.push({ id: docSnap.id, ...docSnap.data() } as SupportTicket);
+          });
+
+          setMyTickets((prev) => {
+            const map = new Map<string, SupportTicket>();
+            cloudTickets.forEach((t) => map.set(t.ticketNumber || t.id, t));
+            prev.forEach((t) => {
+              if (!map.has(t.ticketNumber || t.id)) {
+                map.set(t.ticketNumber || t.id, t);
+              }
+            });
+            return Array.from(map.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+          });
+        }
+      }, (err) => {
+        console.warn('Silent support tickets sync notification:', err);
+      });
+
+      return () => unsub();
+    } catch (err) {
+      console.warn('Failed to attach support tickets snapshot:', err);
+    }
+  }, [user?.uid]);
 
   const handleCopy = (text: string, key: string) => {
     triggerHaptic('light');

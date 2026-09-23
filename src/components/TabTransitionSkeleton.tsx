@@ -2,7 +2,7 @@ import React from 'react';
 import { motion } from 'motion/react';
 
 interface TabTransitionSkeletonProps {
-  tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account';
+  tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin';
 }
 
 export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ tab }) => {
@@ -247,8 +247,8 @@ export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ ta
         </>
       )}
 
-      {/* 6. ACCOUNT SKELETON */}
-      {tab === 'account' && (
+      {/* 6. ACCOUNT / ADMIN SKELETON */}
+      {(tab === 'account' || tab === 'admin') && (
         <>
           {/* Member Card Header */}
           <div className="rounded-2xl bg-gray-900 border border-gray-800 p-4 space-y-3 animate-pulse">

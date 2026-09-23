@@ -28,6 +28,7 @@ interface AccountViewProps {
   onTestInactivityWarning?: () => void;
   onOpenSupport?: () => void;
   onDownloadApp?: () => void;
+  onOpenAdminHub?: () => void;
 }
 
 export const AccountView: React.FC<AccountViewProps> = ({ 
@@ -36,7 +37,8 @@ export const AccountView: React.FC<AccountViewProps> = ({
   onSelectGame, 
   onTestInactivityWarning,
   onOpenSupport,
-  onDownloadApp
+  onDownloadApp,
+  onOpenAdminHub
 }) => {
   const { user, profile, isAdmin, logout, transactions, pendingRequestsCount, triggerBetNotification } = useAuth();
   const [hapticsOn, setHapticsOn] = useState<boolean>(isHapticEnabled());
@@ -158,6 +160,46 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
         </div>
       </div>
+
+      {/* Super Admin Master Control Hub Banner */}
+      {isAdmin && (
+        <div
+          onClick={() => {
+            triggerHaptic('heavy');
+            if (onOpenAdminHub) {
+              onOpenAdminHub();
+            } else {
+              setShowAdminConsole(true);
+            }
+          }}
+          className="bg-gradient-to-r from-amber-600 via-amber-500 to-yellow-500 p-[1.5px] rounded-2xl cursor-pointer shadow-xl hover:scale-[1.01] transition"
+        >
+          <div className="bg-gray-950 p-4 rounded-2xl flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-amber-500/20 border border-amber-400/40 flex items-center justify-center text-amber-400 shadow-inner">
+                <Crown className="w-6 h-6" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <span className="text-sm font-black text-white tracking-wide">
+                    Master Admin & Support Center
+                  </span>
+                  <span className="px-2 py-0.5 rounded-full bg-amber-400 text-gray-950 font-black text-[9px] uppercase">
+                    SPECIAL
+                  </span>
+                </div>
+                <p className="text-[11px] text-gray-400 mt-0.5">
+                  Wingo Outcome Oracle, User Support Queries & Risk Controls
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center gap-1 text-xs font-bold text-amber-400">
+              <span>Enter Hub</span>
+              <ChevronRight className="w-4 h-4" />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* VIP Level Progress Tracker */}
       <VipProgressTracker />
@@ -557,6 +599,25 @@ export const AccountView: React.FC<AccountViewProps> = ({
           </div>
           <ChevronRight className="w-4 h-4 text-gray-500" />
         </div>
+
+        <a 
+          href="/winxbet-app.zip"
+          download="winxbet-app.zip"
+          onClick={() => triggerHaptic('success')}
+          className="p-3.5 flex items-center justify-between text-xs hover:bg-gray-800/40 cursor-pointer transition block"
+        >
+          <div className="flex items-center gap-3 text-gray-300 font-semibold">
+            <Download className="w-4 h-4 text-amber-400" />
+            <div>
+              <div className="text-white flex items-center gap-2">
+                <span>Download App Source Code (.zip)</span>
+                <span className="px-1.5 py-0.2 bg-amber-500/20 text-amber-300 rounded text-[9px] font-bold">ZIP</span>
+              </div>
+              <p className="text-[10px] text-gray-400 font-normal">Complete frontend codebase package</p>
+            </div>
+          </div>
+          <ChevronRight className="w-4 h-4 text-gray-500" />
+        </a>
 
         {user && (
           <button

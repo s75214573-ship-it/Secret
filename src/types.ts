@@ -226,6 +226,16 @@ export interface SupportMessage {
   isAutomated?: boolean;
 }
 
+export interface WingoUpcomingResult {
+  periodId: string;
+  number: number;
+  colors: ('Green' | 'Violet' | 'Red')[];
+  size: 'Big' | 'Small';
+  hash: string;
+  isOverridden: boolean;
+  timeLeft: number;
+}
+
 export interface SupportTicket {
   id: string;
   ticketNumber: string;
@@ -240,7 +250,11 @@ export interface SupportTicket {
   priority: 'low' | 'medium' | 'high' | 'urgent';
   createdAt: number;
   updatedAt: number;
+  resolvedAt?: number;
+  resolvedBy?: string;
+  resolutionNotes?: string;
   adminReply?: string;
+  creditedAmount?: number;
   referenceId?: string; // e.g. UTR, Bet ID, Period ID
 }
 

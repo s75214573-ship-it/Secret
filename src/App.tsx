@@ -9,6 +9,7 @@ import { AccountView } from './components/AccountView';
 import { AuthModal } from './components/AuthModal';
 import { WalletModal } from './components/WalletModal';
 import { AdminConsoleModal } from './components/AdminConsoleModal';
+import { AdminSpecialPage } from './components/AdminSpecialPage';
 import { LoginFirstGateway } from './components/LoginFirstGateway';
 import { RegistrationBonusModal } from './components/RegistrationBonusModal';
 import { InactivityWarningModal } from './components/InactivityWarningModal';
@@ -48,10 +49,10 @@ function AppContent() {
     dismissBetNotification
   } = useAuth();
 
-  // Navigation: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account'
-  const [currentTab, setCurrentTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account'>('home');
+  // Navigation: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'
+  const [currentTab, setCurrentTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'>('home');
   const [isTabTransitioning, setIsTabTransitioning] = useState<boolean>(false);
-  const [displaySkeletonTab, setDisplaySkeletonTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account'>('home');
+  const [displaySkeletonTab, setDisplaySkeletonTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'>('home');
   const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
@@ -99,7 +100,7 @@ function AppContent() {
     setWalletModalOpen(true);
   };
 
-  const handleSwitchTab = (tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account') => {
+  const handleSwitchTab = (tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin') => {
     if (tab === currentTab && !isTabTransitioning) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -200,6 +201,25 @@ function AppContent() {
           </div>
 
           <div className="flex items-center gap-2">
+            {isAdmin && (
+              <button
+                id="header-admin-hub-btn"
+                onClick={() => {
+                  triggerHaptic('heavy');
+                  handleSwitchTab('admin');
+                }}
+                className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl text-xs font-black transition ${
+                  currentTab === 'admin'
+                    ? 'bg-gradient-to-r from-amber-500 to-amber-600 text-gray-950 shadow-md shadow-amber-500/30'
+                    : 'bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 text-amber-300'
+                }`}
+                title="Super Admin Special Center & Support Queries"
+              >
+                <Crown className="w-3.5 h-3.5 text-amber-400" />
+                <span className="hidden sm:inline">Admin Hub</span>
+              </button>
+            )}
+
             <button
               id="header-wallet-btn"
               onClick={() => openWallet('deposit')}
@@ -267,6 +287,7 @@ function AppContent() {
                       triggerHaptic('light');
                       setAuthModalOpen(true);
                     }}
+                    onOpenAdminHub={() => handleSwitchTab('admin')}
                   />
                 )}
 
@@ -307,6 +328,7 @@ function AppContent() {
                       onOpenAuth={() => setAuthModalOpen(true)}
                       onTestInactivityWarning={() => simulateWarning(60)}
                       onDownloadApp={triggerInstall}
+                      onOpenAdminHub={() => handleSwitchTab('admin')}
                       onSelectGame={(game) => {
                         triggerHaptic('medium');
                         if (game === 'aviator') {
@@ -326,6 +348,7 @@ function AppContent() {
                     onTestInactivityWarning={() => simulateWarning(60)}
                     onOpenSupport={() => setSupportModalOpen(true)}
                     onDownloadApp={triggerInstall}
+                    onOpenAdminHub={() => handleSwitchTab('admin')}
                     onSelectGame={(game) => {
                       triggerHaptic('medium');
                       if (game === 'aviator') {
@@ -334,6 +357,13 @@ function AppContent() {
                         handleSwitchTab('wingo');
                       }
                     }}
+                  />
+                )}
+
+                {currentTab === 'admin' && (
+                  <AdminSpecialPage
+                    onBackToGame={() => handleSwitchTab('wingo')}
+                    onOpenWallet={openWallet}
                   />
                 )}
               </motion.div>
@@ -415,18 +445,22 @@ function AppContent() {
             <span className="text-[10px] font-bold">Wallet</span>
           </button>
 
-          {/* Account */}
+          {/* Account / Admin Hub */}
           <button
             id="nav-tab-account"
-            onClick={() => handleSwitchTab('account')}
+            onClick={() => handleSwitchTab(isAdmin ? (currentTab === 'admin' ? 'account' : 'admin') : 'account')}
             className={`flex flex-col items-center gap-1 transition relative ${
-              (currentTab === 'account' || (isTabTransitioning && displaySkeletonTab === 'account'))
+              ((currentTab === 'account' || currentTab === 'admin') || (isTabTransitioning && (displaySkeletonTab === 'account' || displaySkeletonTab === 'admin')))
                 ? 'text-amber-400 scale-105' 
                 : 'text-gray-400 hover:text-gray-200'
             }`}
           >
             <div className="relative">
-              <UserIcon className="w-5 h-5" />
+              {isAdmin ? (
+                currentTab === 'admin' ? <UserIcon className="w-5 h-5" /> : <Crown className="w-5 h-5 text-amber-400" />
+              ) : (
+                <UserIcon className="w-5 h-5" />
+              )}
               {isAdmin && (
                 <span className="absolute -top-1 -right-2 px-1 rounded-full bg-amber-500 text-[8px] font-black text-gray-950 flex items-center gap-0.5">
                   ADM
@@ -436,7 +470,9 @@ function AppContent() {
                 </span>
               )}
             </div>
-            <span className="text-[10px] font-bold">{isAdmin ? 'Admin' : 'Account'}</span>
+            <span className="text-[10px] font-bold">
+              {isAdmin ? (currentTab === 'admin' ? 'Account' : 'Admin Hub') : 'Account'}
+            </span>
           </button>
         </nav>
 

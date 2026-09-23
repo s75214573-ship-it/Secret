@@ -24,7 +24,8 @@ import {
   CircleDot,
   X,
   ChevronDown,
-  BarChart3
+  BarChart3,
+  Crown
 } from 'lucide-react';
 import { WingoVisualTrendChart } from './WingoVisualTrendChart';
 import { triggerHaptic, isHapticsEnabled, setHapticsEnabled } from '../utils/haptics';
@@ -42,10 +43,11 @@ import {
 interface WingoGameProps {
   onOpenWallet: () => void;
   onOpenAuth: () => void;
+  onOpenAdminHub?: () => void;
 }
 
-export const WingoGame: React.FC<WingoGameProps> = ({ onOpenWallet, onOpenAuth }) => {
-  const { user, profile, placeBet, recentBets } = useAuth();
+export const WingoGame: React.FC<WingoGameProps> = ({ onOpenWallet, onOpenAuth, onOpenAdminHub }) => {
+  const { user, profile, placeBet, recentBets, isAdmin } = useAuth();
   const { 
     wingoTimeLeft, 
     wingoCurrentPeriod, 
@@ -54,6 +56,7 @@ export const WingoGame: React.FC<WingoGameProps> = ({ onOpenWallet, onOpenAuth }
     wingoRevealedResult, 
     wingoIsRevealing, 
     registerWingoBet,
+    wingoUpcomingResult,
     retentionWindowMinutes,
     totalPurgedWingoCount,
     continuousEngineUptimeSec,
@@ -246,6 +249,61 @@ export const WingoGame: React.FC<WingoGameProps> = ({ onOpenWallet, onOpenAuth }
           <span className="text-[8px] font-black uppercase">Haptic</span>
         </button>
       </div>
+
+      {/* VIP Super Admin Pre-Session Result Peek */}
+      {isAdmin && wingoUpcomingResult && (
+        <div className="bg-gradient-to-r from-gray-950 via-purple-950/40 to-gray-950 border border-amber-500/50 rounded-2xl p-3 shadow-lg flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Crown className="w-4 h-4 text-amber-400" />
+              <span className="text-[11px] font-black text-amber-300 uppercase tracking-wide">
+                Admin Pre-Session Result Peek
+              </span>
+              <span className="text-[10px] text-gray-400 font-mono">#{wingoUpcomingResult.periodId}</span>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">Draw in {wingoTimeLeft}s</span>
+              {onOpenAdminHub && (
+                <button
+                  onClick={onOpenAdminHub}
+                  className="px-2 py-0.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-400/40 rounded-lg text-[9px] font-bold text-amber-300 transition"
+                >
+                  Admin Hub →
+                </button>
+              )}
+            </div>
+          </div>
+
+          <div className="flex items-center justify-between bg-gray-950/90 border border-gray-800 rounded-xl px-3 py-1.5">
+            <div className="flex items-center gap-2">
+              <span className="text-[10px] text-gray-400">Outcome:</span>
+              <span className={`w-6 h-6 rounded-lg flex items-center justify-center text-white font-mono font-black text-xs ${
+                wingoUpcomingResult.number === 0 ? 'bg-gradient-to-tr from-rose-600 to-purple-600' :
+                wingoUpcomingResult.number === 5 ? 'bg-gradient-to-tr from-emerald-600 to-purple-600' :
+                [1, 3, 7, 9].includes(wingoUpcomingResult.number) ? 'bg-emerald-600' : 'bg-rose-600'
+              }`}>
+                {wingoUpcomingResult.number}
+              </span>
+              <span className="text-[10px] font-bold text-amber-400 font-mono">
+                [{wingoUpcomingResult.size} / {wingoUpcomingResult.colors.join('+')}]
+              </span>
+            </div>
+
+            <div className="flex items-center gap-1 text-[9px] font-mono">
+              {wingoUpcomingResult.isOverridden ? (
+                <span className="px-1.5 py-0.5 rounded bg-amber-500/20 text-amber-300 font-bold border border-amber-500/30">
+                  ADMIN OVERRIDE
+                </span>
+              ) : (
+                <span className="text-emerald-400">
+                  PROVABLY FAIR
+                </span>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Period & Countdown Clock Banner */}
       <div className="bg-gradient-to-br from-gray-950 via-gray-900 to-gray-950 border border-amber-500/30 rounded-3xl p-4 shadow-xl relative overflow-hidden">

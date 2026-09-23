@@ -2,7 +2,6 @@ import React, { useState, useMemo } from 'react';
 import { useAuth, DAILY_CHECKIN_MIN_DEPOSIT } from '../context/AuthContext';
 import { 
   Users, 
-  UserPlus, 
   Gift, 
   Copy, 
   Check, 
@@ -18,7 +17,8 @@ import {
   ExternalLink,
   MessageCircle,
   Clock,
-  ShieldCheck
+  ShieldCheck,
+  Radio
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 import { triggerHaptic } from '../utils/haptics';
@@ -31,7 +31,6 @@ export const PromotionView: React.FC<PromotionViewProps> = ({ onOpenWallet }) =>
   const { 
     profile, 
     referrals, 
-    addReferralInvite, 
     claimDailyBonus, 
     isDailyClaimedToday,
     todayDepositAmount,
@@ -44,11 +43,13 @@ export const PromotionView: React.FC<PromotionViewProps> = ({ onOpenWallet }) =>
   const [bonusClaimed, setBonusClaimed] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'all' | 'level1' | 'level2' | 'top'>('all');
-  const [isSimulating, setIsSimulating] = useState(false);
   const [statusNotice, setStatusNotice] = useState<string | null>(null);
 
   const referralCode = profile?.referralCode || 'WINX786';
-  const inviteUrl = `https://winxbet.vip/#/register?invitationCode=${referralCode}`;
+  const siteOrigin = typeof window !== 'undefined' && window.location.origin && !window.location.origin.includes('localhost')
+    ? window.location.origin
+    : 'https://winxbet-indol-ten.vercel.app';
+  const inviteUrl = `${siteOrigin}/#/register?invitationCode=${referralCode}`;
   const isClaimed = isDailyClaimedToday || bonusClaimed;
 
   // Aggregate stats from real referral list
@@ -140,21 +141,6 @@ export const PromotionView: React.FC<PromotionViewProps> = ({ onOpenWallet }) =>
     triggerHaptic('light');
     const text = encodeURIComponent(`Register with my referral code ${referralCode} to get ₹68 instant bonus!`);
     window.open(`https://t.me/share/url?url=${encodeURIComponent(inviteUrl)}&text=${text}`, '_blank');
-  };
-
-  const handleSimulateInvite = async () => {
-    triggerHaptic('medium');
-    setIsSimulating(true);
-    try {
-      const res = await addReferralInvite();
-      if (res.success) {
-        confetti({ particleCount: 60, spread: 55, origin: { y: 0.6 } });
-        setStatusNotice(res.message);
-        setTimeout(() => setStatusNotice(null), 4000);
-      }
-    } finally {
-      setIsSimulating(false);
-    }
   };
 
   const handleDailyCheckIn = async () => {
@@ -312,16 +298,10 @@ export const PromotionView: React.FC<PromotionViewProps> = ({ onOpenWallet }) =>
             </div>
           </div>
           
-          <button
-            id="simulate-referral-btn"
-            onClick={handleSimulateInvite}
-            disabled={isSimulating}
-            className="px-3 py-1.5 bg-gray-800 hover:bg-gray-700 text-amber-400 text-xs font-bold rounded-xl border border-gray-700 flex items-center gap-1.5 transition active:scale-95 disabled:opacity-50"
-            title="Simulate a new member joining with your code"
-          >
-            <UserPlus className="w-3.5 h-3.5" />
-            <span>{isSimulating ? 'Inviting...' : '+ Test Invite'}</span>
-          </button>
+          <div className="flex items-center gap-1.5 px-3 py-1.5 bg-emerald-500/10 border border-emerald-500/30 rounded-xl text-emerald-400 text-xs font-bold shadow-sm">
+            <Radio className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Real-time Live Sync</span>
+          </div>
         </div>
 
         {/* Code and Link container */}
@@ -491,10 +471,32 @@ export const PromotionView: React.FC<PromotionViewProps> = ({ onOpenWallet }) =>
 
         {/* Invited Users List */}
         {filteredReferrals.length === 0 ? (
-          <div className="py-12 text-center bg-gray-950/60 rounded-2xl border border-gray-800/80 space-y-2">
-            <Users className="w-10 h-10 text-gray-600 mx-auto" />
-            <p className="text-xs font-bold text-gray-400">No invited members found matching this filter</p>
-            <p className="text-[11px] text-gray-500">Copy your unique link or click '+ Test Invite' above to test inviting users.</p>
+          <div className="py-10 px-4 text-center bg-gray-950/60 rounded-2xl border border-gray-800/80 space-y-3">
+            <div className="w-12 h-12 rounded-2xl bg-amber-500/10 border border-amber-500/20 flex items-center justify-center mx-auto text-amber-400">
+              <Users className="w-6 h-6" />
+            </div>
+            <div>
+              <p className="text-sm font-bold text-white">No Referred Members Yet</p>
+              <p className="text-xs text-gray-400 max-w-md mx-auto mt-1 leading-relaxed">
+                When friends register using your unique link or code, they will appear here automatically with their turnover and real-time 0.60% commission credited to your wallet.
+              </p>
+            </div>
+            <div className="flex items-center justify-center gap-2 pt-1">
+              <button
+                onClick={handleCopyLink}
+                className="px-4 py-2 bg-gradient-to-r from-red-600 to-amber-600 hover:from-red-500 hover:to-amber-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+              >
+                <Copy className="w-3.5 h-3.5" />
+                <span>{copiedLink ? 'Copied Link!' : 'Copy Referral Link'}</span>
+              </button>
+              <button
+                onClick={handleShareWhatsApp}
+                className="px-4 py-2 bg-emerald-600 hover:bg-emerald-500 text-white font-bold text-xs rounded-xl shadow-lg flex items-center gap-1.5 transition active:scale-95 cursor-pointer"
+              >
+                <MessageCircle className="w-3.5 h-3.5" />
+                <span>WhatsApp Share</span>
+              </button>
+            </div>
           </div>
         ) : (
           <div className="space-y-2.5">

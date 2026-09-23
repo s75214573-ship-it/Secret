@@ -1,15 +1,17 @@
-import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { 
   collection, 
   doc, 
   setDoc, 
+  updateDoc,
+  deleteField,
   query, 
   orderBy, 
   limit, 
   onSnapshot 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { WingoPeriod, AviatorRoundRecord, GlobalBet, LiveRoundBetPool } from '../types';
+import { WingoPeriod, AviatorRoundRecord, GlobalBet, LiveRoundBetPool, WingoUpcomingResult } from '../types';
 import { 
   generateHistoricalPeriods, 
   getWingoPeriodId,
@@ -82,6 +84,11 @@ interface ContinuousGameContextType {
   wingoIsRevealing: boolean;
   wingoPendingBets: PendingWingoBet[];
   registerWingoBet: (bet: PendingWingoBet) => void;
+  wingoUpcomingResult: WingoUpcomingResult;
+  wingoOverrides: Record<string, number>;
+  adminSetWingoOverride: (periodId: string, targetNumber: number) => Promise<{ success: boolean; message: string }>;
+  adminClearWingoOverride: (periodId: string) => Promise<{ success: boolean; message: string }>;
+  getWingoUpcomingForecast: (count?: number) => WingoUpcomingResult[];
 
   // Aviator Continuous State
   aviatorPhase: 'countdown' | 'flying' | 'crashed';
@@ -153,6 +160,123 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   const [wingoPendingBets, setWingoPendingBets] = useState<PendingWingoBet[]>([]);
   const wingoPendingBetsRef = useRef<PendingWingoBet[]>([]);
   wingoPendingBetsRef.current = wingoPendingBets;
+
+  // Admin round override registry (stores custom pre-set outcomes for upcoming or active periods)
+  const [wingoOverrides, setWingoOverrides] = useState<Record<string, number>>(() => {
+    try {
+      const saved = localStorage.getItem('winxbet_wingo_overrides');
+      return saved ? JSON.parse(saved) : {};
+    } catch {
+      return {};
+    }
+  });
+  const wingoOverridesRef = useRef<Record<string, number>>(wingoOverrides);
+  wingoOverridesRef.current = wingoOverrides;
+
+  // Real-time Firestore sync for cloud-wide synchronized admin overrides
+  useEffect(() => {
+    try {
+      const docRef = doc(db, 'system', 'wingoOverrides');
+      const unsub = onSnapshot(docRef, (snap) => {
+        if (snap.exists()) {
+          const data = snap.data() as Record<string, number>;
+          setWingoOverrides((prev) => {
+            const merged = { ...prev, ...data };
+            try {
+              localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(merged));
+            } catch {}
+            return merged;
+          });
+        }
+      }, (err) => {
+        console.warn('Wingo overrides cloud listener notice:', err);
+      });
+      return () => unsub();
+    } catch (e) {
+      console.warn('Wingo overrides setup error:', e);
+    }
+  }, []);
+
+  const adminSetWingoOverride = useCallback(async (periodId: string, targetNumber: number): Promise<{ success: boolean; message: string }> => {
+    if (targetNumber < 0 || targetNumber > 9) {
+      return { success: false, message: 'Invalid target number. Must be between 0 and 9.' };
+    }
+    setWingoOverrides((prev) => {
+      const next = { ...prev, [periodId]: targetNumber };
+      try {
+        localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'system', 'wingoOverrides'), { [periodId]: targetNumber }, { merge: true });
+    } catch (err) {
+      console.warn('Error saving override to Firestore:', err);
+    }
+
+    return { success: true, message: `Round #${periodId} result locked to Number ${targetNumber}!` };
+  }, []);
+
+  const adminClearWingoOverride = useCallback(async (periodId: string): Promise<{ success: boolean; message: string }> => {
+    setWingoOverrides((prev) => {
+      const next = { ...prev };
+      delete next[periodId];
+      try {
+        localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next));
+      } catch {}
+      return next;
+    });
+
+    try {
+      await updateDoc(doc(db, 'system', 'wingoOverrides'), {
+        [periodId]: deleteField()
+      });
+    } catch (err) {
+      console.warn('Error clearing override in Firestore:', err);
+    }
+
+    return { success: true, message: `Round #${periodId} reset to provably fair deterministic lottery.` };
+  }, []);
+
+  // Live pre-session result peek for the currently active period before it concludes
+  const wingoUpcomingResult = useMemo<WingoUpcomingResult>(() => {
+    const periodId = wingoCurrentPeriod;
+    const hasOverride = wingoOverrides[periodId] !== undefined;
+    const det = getDeterministicRoundResult(periodId);
+    const num = hasOverride ? wingoOverrides[periodId] : det.number;
+    return {
+      periodId,
+      number: num,
+      colors: getNumberColors(num),
+      size: getNumberSize(num),
+      hash: det.hash,
+      isOverridden: hasOverride,
+      timeLeft: wingoTimeLeft
+    };
+  }, [wingoCurrentPeriod, wingoOverrides, wingoTimeLeft]);
+
+  // Multi-period future forecast (next N rounds)
+  const getWingoUpcomingForecast = useCallback((count: number = 6): WingoUpcomingResult[] => {
+    const list: WingoUpcomingResult[] = [];
+    let curPeriod = wingoCurrentPeriod;
+    for (let i = 0; i < count; i++) {
+      const hasOverride = wingoOverrides[curPeriod] !== undefined;
+      const det = getDeterministicRoundResult(curPeriod);
+      const num = hasOverride ? wingoOverrides[curPeriod] : det.number;
+      list.push({
+        periodId: curPeriod,
+        number: num,
+        colors: getNumberColors(num),
+        size: getNumberSize(num),
+        hash: det.hash,
+        isOverridden: hasOverride,
+        timeLeft: i === 0 ? wingoTimeLeft : i * 60 + wingoTimeLeft
+      });
+      curPeriod = getNextPeriodId(curPeriod);
+    }
+    return list;
+  }, [wingoCurrentPeriod, wingoOverrides, wingoTimeLeft]);
 
   const wingoIsLocked = wingoTimeLeft <= 5;
 
@@ -262,17 +386,22 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
         setWingoCurrentPeriod(nextPeriodId);
         wingoCurrentPeriodRef.current = nextPeriodId;
 
-        // Compute provably fair deterministic result for this period
+        // Compute provably fair deterministic result or respect admin override for this period
+        const overrideNum = wingoOverridesRef.current[resolvedPeriodId];
         const deterministic = getDeterministicRoundResult(resolvedPeriodId);
+        const finalNumber = overrideNum !== undefined ? overrideNum : deterministic.number;
+        const finalColors = getNumberColors(finalNumber);
+        const finalSize = getNumberSize(finalNumber);
+        const finalHash = deterministic.hash;
         const d = new Date(now);
         const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
 
         const newPeriod: WingoPeriod = {
           periodId: resolvedPeriodId,
-          number: deterministic.number,
-          colors: deterministic.colors,
-          size: deterministic.size,
-          hash: deterministic.hash,
+          number: finalNumber,
+          colors: finalColors,
+          size: finalSize,
+          hash: finalHash,
           time: timeStr,
           timestamp: now
         };
@@ -292,13 +421,13 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
         setWingoIsRevealing(true);
         setTimeout(() => setWingoIsRevealing(false), 3000);
 
-        // Settle matching pending bets for this period
+        // Settle matching pending bets for this period using the authoritative final number
         const currentPending = wingoPendingBetsRef.current;
         const matching = currentPending.filter(b => b.periodId === resolvedPeriodId);
         matching.forEach(bet => {
           const netWager = bet.netAmount ?? Number((bet.amount * bet.multiplier * (1 - 0.03)).toFixed(4));
-          const result = calculateBetResult(bet.selection, netWager, deterministic.number);
-          settleBet(bet.betId, result.won, result.winAmount, deterministic.number);
+          const result = calculateBetResult(bet.selection, netWager, finalNumber);
+          settleBet(bet.betId, result.won, result.winAmount, finalNumber);
         });
 
         setWingoPendingBets(prev => prev.filter(b => b.periodId !== resolvedPeriodId));
@@ -740,6 +869,11 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
         wingoIsRevealing,
         wingoPendingBets,
         registerWingoBet,
+        wingoUpcomingResult,
+        wingoOverrides,
+        adminSetWingoOverride,
+        adminClearWingoOverride,
+        getWingoUpcomingForecast,
 
         aviatorPhase,
         aviatorCountdownLeft,
