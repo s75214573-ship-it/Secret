@@ -1,0 +1,6 @@
+{
+  "name": "WinXbet",
+  "description": "WinXbet online color prediction lottery, Win Go, Aviator, slots, wallet, and promotion gaming platform.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

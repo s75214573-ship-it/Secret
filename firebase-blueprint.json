@@ -1,0 +1,203 @@
+{
+  "entities": {
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "User profile with balance, VIP level, referral code, and stats",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string" },
+        "displayName": { "type": "string" },
+        "phoneNumber": { "type": "string" },
+        "email": { "type": "string" },
+        "balance": { "type": "number" },
+        "vipLevel": { "type": "number" },
+        "referralCode": { "type": "string" },
+        "referredBy": { "type": "string" },
+        "totalRecharge": { "type": "number" },
+        "totalWithdraw": { "type": "number" },
+        "role": { "type": "string", "enum": ["user", "admin"] },
+        "status": { "type": "string", "enum": ["active", "frozen", "restricted"] },
+        "adminNotes": { "type": "string" },
+        "customPin": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["uid", "balance"]
+    },
+    "GameBet": {
+      "title": "GameBet",
+      "description": "Bets placed on WinGo or other color prediction games",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "gameType": { "type": "string" },
+        "periodId": { "type": "string" },
+        "selection": { "type": "string" },
+        "amount": { "type": "number" },
+        "multiplier": { "type": "number" },
+        "result": { "type": "string" },
+        "winAmount": { "type": "number" },
+        "status": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "gameType", "periodId", "selection", "amount"]
+    },
+    "GlobalBet": {
+      "title": "GlobalBet",
+      "description": "Global synchronized bet record visible to admin and live feeds",
+      "type": "object",
+      "properties": {
+        "betId": { "type": "string" },
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "gameType": { "type": "string" },
+        "periodId": { "type": "string" },
+        "selection": { "type": "string" },
+        "amount": { "type": "number" },
+        "multiplier": { "type": "number" },
+        "netAmount": { "type": "number" },
+        "fee": { "type": "number" },
+        "status": { "type": "string" },
+        "winAmount": { "type": "number" },
+        "result": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "timestamp": { "type": "number" }
+      },
+      "required": ["betId", "userId", "gameType", "periodId", "selection", "amount", "status"]
+    },
+    "WingoRound": {
+      "title": "WingoRound",
+      "description": "Shared cloud-authoritative WinGo period result and live bet pools",
+      "type": "object",
+      "properties": {
+        "periodId": { "type": "string" },
+        "number": { "type": "number" },
+        "colors": { "type": "array", "items": { "type": "string" } },
+        "size": { "type": "string" },
+        "hash": { "type": "string" },
+        "time": { "type": "string" },
+        "timestamp": { "type": "number" },
+        "totalBetted": { "type": "number" },
+        "totalBetsCount": { "type": "number" },
+        "betAmountsBySelection": { "type": "object" },
+        "status": { "type": "string" }
+      },
+      "required": ["periodId", "number", "colors", "size", "timestamp"]
+    },
+    "AviatorRound": {
+      "title": "AviatorRound",
+      "description": "Shared cloud-authoritative Aviator flight round and crash point",
+      "type": "object",
+      "properties": {
+        "roundId": { "type": "string" },
+        "crashPoint": { "type": "number" },
+        "startTime": { "type": "number" },
+        "timestamp": { "type": "number" },
+        "status": { "type": "string" },
+        "totalBetted": { "type": "number" },
+        "totalBetsCount": { "type": "number" }
+      },
+      "required": ["roundId", "crashPoint", "timestamp"]
+    },
+    "Transaction": {
+      "title": "Transaction",
+      "description": "Wallet recharge or withdrawal records",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "type": { "type": "string" },
+        "amount": { "type": "number" },
+        "channel": { "type": "string" },
+        "status": { "type": "string" },
+        "txId": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "amount", "status"]
+    },
+    "ReferralMember": {
+      "title": "ReferralMember",
+      "description": "Invited user records and their generated commission",
+      "type": "object",
+      "properties": {
+        "phoneNumber": { "type": "string" },
+        "displayName": { "type": "string" },
+        "level": { "type": "number" },
+        "joinedAt": { "type": "string", "format": "date-time" },
+        "totalDeposit": { "type": "number" },
+        "totalTurnover": { "type": "number" },
+        "commissionEarned": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["phoneNumber", "level", "commissionEarned"]
+    },
+    "PaymentRequest": {
+      "title": "PaymentRequest",
+      "description": "User deposit proof or withdrawal requests awaiting admin verification",
+      "type": "object",
+      "properties": {
+        "userId": { "type": "string" },
+        "userDisplayName": { "type": "string" },
+        "userPhone": { "type": "string" },
+        "userEmail": { "type": "string" },
+        "type": { "type": "string", "enum": ["deposit", "withdraw"] },
+        "amount": { "type": "number" },
+        "channel": { "type": "string" },
+        "utrNumber": { "type": "string" },
+        "upiId": { "type": "string" },
+        "proofImageUrl": { "type": "string" },
+        "proofFileName": { "type": "string" },
+        "senderUpiId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "paymentApp": { "type": "string" },
+        "status": { "type": "string", "enum": ["pending", "completed", "rejected"] },
+        "txId": { "type": "string" },
+        "adminNotes": { "type": "string" },
+        "rejectionReason": { "type": "string" },
+        "verifiedBy": { "type": "string" },
+        "verifiedAt": { "type": "string", "format": "date-time" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["userId", "type", "amount", "status", "txId", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/users/{userId}": {
+      "schema": "UserProfile",
+      "description": "Individual user document"
+    },
+    "/users/{userId}/bets/{betId}": {
+      "schema": "GameBet",
+      "description": "Individual user bet records"
+    },
+    "/users/{userId}/transactions/{txId}": {
+      "schema": "Transaction",
+      "description": "User wallet transaction histories"
+    },
+    "/users/{userId}/referrals/{referralId}": {
+      "schema": "ReferralMember",
+      "description": "Invited team members and commission earnings"
+    },
+    "/paymentRequests/{requestId}": {
+      "schema": "PaymentRequest",
+      "description": "Global deposit & withdrawal requests awaiting admin verification"
+    },
+    "/wingoRounds/{periodId}": {
+      "schema": "WingoRound",
+      "description": "Shared cloud-authoritative WinGo period results and aggregated bets"
+    },
+    "/aviatorRounds/{roundId}": {
+      "schema": "AviatorRound",
+      "description": "Shared cloud-authoritative Aviator flight rounds"
+    },
+    "/globalBets/{betId}": {
+      "schema": "GlobalBet",
+      "description": "Shared real-time bets stream accessible to admin for live pool inspection"
+    },
+    "/system/{docId}": {
+      "description": "Platform global state, liquidity reserves, and system configurations"
+    },
+    "/test/{docId}": {
+      "description": "Connectivity test probe for Firestore health check"
+    }
+  }
+}
