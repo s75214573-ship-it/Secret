@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { GameCategoryId, GameCategoryDefinition } from '../types';
+import { GameCategoryId, GameCategoryDefinition, GameRoute } from '../types';
 import { GAME_CATEGORIES } from '../data/categories';
 import { 
   BookOpen, 
@@ -26,7 +26,7 @@ interface CategoryDefinitionModalProps {
   isOpen: boolean;
   onClose: () => void;
   initialCategoryId?: GameCategoryId;
-  onSelectGame?: (game: 'wingo' | 'aviator' | 'k3' | 'trx' | 'slots') => void;
+  onSelectGame?: (game: GameRoute) => void;
 }
 
 const CATEGORY_ICONS: Record<GameCategoryId, React.ComponentType<{ className?: string }>> = {

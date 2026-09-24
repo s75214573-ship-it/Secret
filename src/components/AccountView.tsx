@@ -20,11 +20,12 @@ import { WeeklyPerformanceChart } from './WeeklyPerformanceChart';
 import { AdminConsoleModal } from './AdminConsoleModal';
 import { CategoryDefinitionModal } from './CategoryDefinitionModal';
 import { ErrorBoundary } from './ErrorBoundary';
+import { GameRoute } from '../types';
 
 interface AccountViewProps {
   onOpenWallet: (tab?: 'deposit' | 'withdraw') => void;
   onOpenAuth: () => void;
-  onSelectGame?: (game: 'wingo' | 'aviator' | 'k3' | 'trx' | 'slots') => void;
+  onSelectGame?: (game: GameRoute) => void;
   onTestInactivityWarning?: () => void;
   onOpenSupport?: () => void;
   onDownloadApp?: () => void;

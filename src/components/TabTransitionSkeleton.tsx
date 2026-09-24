@@ -1,8 +1,10 @@
 import React from 'react';
 import { motion } from 'motion/react';
 
+export type AppTab = 'home' | 'wingo' | 'aviator' | 'k3' | 'trx' | 'dragontiger' | 'mines' | 'slots' | 'promotion' | 'wallet' | 'account' | 'admin';
+
 interface TabTransitionSkeletonProps {
-  tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin';
+  tab: AppTab;
 }
 
 export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ tab }) => {
@@ -72,8 +74,8 @@ export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ ta
         </>
       )}
 
-      {/* 2. WINGO / LOTTERY SKELETON */}
-      {tab === 'wingo' && (
+      {/* 2. WINGO / K3 / TRX LOTTERY SKELETON */}
+      {(tab === 'wingo' || tab === 'k3' || tab === 'trx') && (
         <>
           {/* Game Mode Timer Switcher */}
           <div className="grid grid-cols-4 gap-1.5 p-1 bg-gray-900 border border-gray-800 rounded-xl animate-pulse">
@@ -143,10 +145,10 @@ export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ ta
         </>
       )}
 
-      {/* 3. AVIATOR SKELETON */}
-      {tab === 'aviator' && (
+      {/* 3. AVIATOR / MINES SKELETON */}
+      {(tab === 'aviator' || tab === 'mines') && (
         <>
-          {/* Aviator Multiplier Radar Canvas Placeholder */}
+          {/* Aviator / Mines Radar Canvas Placeholder */}
           <div className="w-full h-56 rounded-2xl bg-gray-950 border border-red-900/40 relative overflow-hidden flex flex-col items-center justify-center p-4 animate-pulse">
             <div className="w-24 h-24 rounded-full border-2 border-dashed border-red-500/30 flex items-center justify-center">
               <div className="w-16 h-6 bg-red-600/30 rounded-md" />
@@ -167,6 +169,24 @@ export const TabTransitionSkeleton: React.FC<TabTransitionSkeletonProps> = ({ ta
                 <div className="h-10 rounded-xl bg-emerald-600/30 border border-emerald-500/30" />
               </div>
             ))}
+          </div>
+        </>
+      )}
+
+      {/* 4. SLOTS / CASINO CARD DUEL SKELETON */}
+      {(tab === 'slots' || tab === 'dragontiger') && (
+        <>
+          <div className="w-full h-52 rounded-2xl bg-gray-950 border border-amber-500/30 p-4 flex flex-col items-center justify-center space-y-3 animate-pulse">
+            <div className="grid grid-cols-3 gap-3 w-full max-w-xs">
+              {[1, 2, 3].map((s) => (
+                <div key={s} className="h-28 rounded-xl bg-gray-900 border border-gray-800" />
+              ))}
+            </div>
+            <div className="w-32 h-4 bg-gray-800 rounded" />
+          </div>
+          <div className="grid grid-cols-2 gap-3 animate-pulse">
+            <div className="h-12 rounded-xl bg-gray-900 border border-gray-800" />
+            <div className="h-12 rounded-xl bg-amber-500/20 border border-amber-500/30" />
           </div>
         </>
       )}

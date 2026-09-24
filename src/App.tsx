@@ -4,6 +4,11 @@ import { ContinuousGameProvider } from './context/ContinuousGameContext';
 import { HomeLobby } from './components/HomeLobby';
 import { WingoGame } from './components/WingoGame';
 import { AviatorGame } from './components/AviatorGame';
+import { K3Game } from './components/K3Game';
+import { TrxGame } from './components/TrxGame';
+import { DragonTigerGame } from './components/DragonTigerGame';
+import { MinesGame } from './components/MinesGame';
+import { SlotsGame } from './components/SlotsGame';
 import { PromotionView } from './components/PromotionView';
 import { AccountView } from './components/AccountView';
 import { AuthModal } from './components/AuthModal';
@@ -14,7 +19,7 @@ import { LoginFirstGateway } from './components/LoginFirstGateway';
 import { RegistrationBonusModal } from './components/RegistrationBonusModal';
 import { InactivityWarningModal } from './components/InactivityWarningModal';
 import { BetResultPopup } from './components/BetResultPopup';
-import { TabTransitionSkeleton } from './components/TabTransitionSkeleton';
+import { TabTransitionSkeleton, AppTab } from './components/TabTransitionSkeleton';
 import { FloatingSupportButton } from './components/FloatingSupportButton';
 import { CustomerSupportModal } from './components/CustomerSupportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
@@ -49,10 +54,10 @@ function AppContent() {
     dismissBetNotification
   } = useAuth();
 
-  // Navigation: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'
-  const [currentTab, setCurrentTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'>('home');
+  // Navigation across lobby, lottery games, originals, slots, casino and account tabs
+  const [currentTab, setCurrentTab] = useState<AppTab>('home');
   const [isTabTransitioning, setIsTabTransitioning] = useState<boolean>(false);
-  const [displaySkeletonTab, setDisplaySkeletonTab] = useState<'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin'>('home');
+  const [displaySkeletonTab, setDisplaySkeletonTab] = useState<AppTab>('home');
   const transitionTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   const [authModalOpen, setAuthModalOpen] = useState<boolean>(false);
@@ -100,7 +105,7 @@ function AppContent() {
     setWalletModalOpen(true);
   };
 
-  const handleSwitchTab = (tab: 'home' | 'wingo' | 'aviator' | 'promotion' | 'wallet' | 'account' | 'admin') => {
+  const handleSwitchTab = (tab: AppTab) => {
     if (tab === currentTab && !isTabTransitioning) {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
@@ -266,11 +271,7 @@ function AppContent() {
                   <HomeLobby
                     onSelectGame={(game) => {
                       triggerHaptic('medium');
-                      if (game === 'wingo' || game === 'k3' || game === 'trx') {
-                        handleSwitchTab('wingo');
-                      } else if (game === 'aviator') {
-                        handleSwitchTab('aviator');
-                      }
+                      handleSwitchTab(game);
                     }}
                     onOpenWallet={openWallet}
                     onOpenAuth={() => {
@@ -293,6 +294,59 @@ function AppContent() {
 
                 {currentTab === 'aviator' && (
                   <AviatorGame
+                    onOpenWallet={openWallet}
+                    onOpenAuth={() => {
+                      triggerHaptic('light');
+                      setAuthModalOpen(true);
+                    }}
+                  />
+                )}
+
+                {currentTab === 'k3' && (
+                  <K3Game
+                    onOpenWallet={openWallet}
+                    onOpenAuth={() => {
+                      triggerHaptic('light');
+                      setAuthModalOpen(true);
+                    }}
+                    onOpenAdminHub={() => handleSwitchTab('admin')}
+                  />
+                )}
+
+                {currentTab === 'trx' && (
+                  <TrxGame
+                    onOpenWallet={openWallet}
+                    onOpenAuth={() => {
+                      triggerHaptic('light');
+                      setAuthModalOpen(true);
+                    }}
+                    onOpenAdminHub={() => handleSwitchTab('admin')}
+                  />
+                )}
+
+                {currentTab === 'dragontiger' && (
+                  <DragonTigerGame
+                    onOpenWallet={openWallet}
+                    onOpenAuth={() => {
+                      triggerHaptic('light');
+                      setAuthModalOpen(true);
+                    }}
+                    onOpenAdminHub={() => handleSwitchTab('admin')}
+                  />
+                )}
+
+                {currentTab === 'mines' && (
+                  <MinesGame
+                    onOpenWallet={openWallet}
+                    onOpenAuth={() => {
+                      triggerHaptic('light');
+                      setAuthModalOpen(true);
+                    }}
+                  />
+                )}
+
+                {currentTab === 'slots' && (
+                  <SlotsGame
                     onOpenWallet={openWallet}
                     onOpenAuth={() => {
                       triggerHaptic('light');
@@ -331,11 +385,7 @@ function AppContent() {
                       onOpenAdminHub={() => handleSwitchTab('admin')}
                       onSelectGame={(game) => {
                         triggerHaptic('medium');
-                        if (game === 'aviator') {
-                          handleSwitchTab('aviator');
-                        } else {
-                          handleSwitchTab('wingo');
-                        }
+                        handleSwitchTab(game);
                       }}
                     />
                   </div>
@@ -351,11 +401,7 @@ function AppContent() {
                     onOpenAdminHub={() => handleSwitchTab('admin')}
                     onSelectGame={(game) => {
                       triggerHaptic('medium');
-                      if (game === 'aviator') {
-                        handleSwitchTab('aviator');
-                      } else {
-                        handleSwitchTab('wingo');
-                      }
+                      handleSwitchTab(game);
                     }}
                   />
                 )}
@@ -400,9 +446,16 @@ function AppContent() {
           {/* Activity / Games */}
           <button
             id="nav-tab-games"
-            onClick={() => handleSwitchTab('wingo')}
+            onClick={() => {
+              if (['wingo', 'aviator', 'k3', 'trx', 'dragontiger', 'mines', 'slots'].includes(currentTab)) {
+                window.scrollTo({ top: 0, behavior: 'smooth' });
+              } else {
+                handleSwitchTab('wingo');
+              }
+            }}
             className={`flex flex-col items-center gap-1 transition ${
-              ((currentTab === 'wingo' || currentTab === 'aviator') || (isTabTransitioning && (displaySkeletonTab === 'wingo' || displaySkeletonTab === 'aviator')))
+              (['wingo', 'aviator', 'k3', 'trx', 'dragontiger', 'mines', 'slots'].includes(currentTab) || 
+               (isTabTransitioning && ['wingo', 'aviator', 'k3', 'trx', 'dragontiger', 'mines', 'slots'].includes(displaySkeletonTab)))
                 ? 'text-amber-400 scale-105'
                 : 'text-gray-400 hover:text-gray-200'
             }`}

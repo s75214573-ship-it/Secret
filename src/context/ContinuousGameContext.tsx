@@ -11,7 +11,20 @@ import {
   onSnapshot 
 } from 'firebase/firestore';
 import { db } from '../firebase';
-import { WingoPeriod, AviatorRoundRecord, GlobalBet, LiveRoundBetPool, WingoUpcomingResult } from '../types';
+import { 
+  WingoPeriod, 
+  AviatorRoundRecord, 
+  GlobalBet, 
+  LiveRoundBetPool, 
+  WingoUpcomingResult,
+  K3Period,
+  K3UpcomingResult,
+  TrxPeriod,
+  TrxUpcomingResult,
+  AviatorUpcomingResult,
+  DragonTigerPeriod,
+  DragonTigerUpcomingResult 
+} from '../types';
 import { 
   generateHistoricalPeriods, 
   getWingoPeriodId,
@@ -26,8 +39,27 @@ import {
   generateHistoricalAviatorRounds, 
   getDeterministicAviatorCrash, 
   getMultiplierTier, 
-  filterLastOneHour 
+  filterLastOneHour,
+  getAviatorMultiplierAtSec,
+  getAviatorFlightDurationSec
 } from '../aviatorLogic';
+import {
+  getK3PeriodId,
+  getK3PeriodData,
+  getDeterministicK3Dice,
+  generateHistoricalK3Periods,
+  calculateK3BetResult
+} from '../k3Logic';
+import {
+  getTrxPeriodId,
+  getDeterministicTrxData,
+  generateHistoricalTrxPeriods,
+  calculateTrxBetResult
+} from '../trxLogic';
+import {
+  getDeterministicDragonTiger,
+  generateHistoricalDragonTiger
+} from '../dragonTigerLogic';
 import { useAuth } from './AuthContext';
 import { triggerHaptic } from '../utils/haptics';
 
@@ -74,6 +106,17 @@ export interface PendingWingoBet {
   fee?: number;
 }
 
+export interface PendingGameBet {
+  betId: string;
+  gameType: 'k3' | 'trx' | 'dragontiger';
+  periodId: string;
+  selection: string;
+  amount: number;
+  multiplier: number;
+  netAmount?: number;
+  fee?: number;
+}
+
 interface ContinuousGameContextType {
   // WinGo Continuous State
   wingoTimeLeft: number;
@@ -90,7 +133,7 @@ interface ContinuousGameContextType {
   adminClearWingoOverride: (periodId: string) => Promise<{ success: boolean; message: string }>;
   getWingoUpcomingForecast: (count?: number) => WingoUpcomingResult[];
 
-  // Aviator Continuous State
+  // Aviator Continuous State (Authentic slower Spribe pacing)
   aviatorPhase: 'countdown' | 'flying' | 'crashed';
   aviatorCountdownLeft: number;
   aviatorCurrentRoundId: string;
@@ -104,6 +147,51 @@ interface ContinuousGameContextType {
   placeAviatorBet: (amount: number, autoCashout?: boolean, autoCashoutMultiplier?: number) => Promise<{ success: boolean; message: string }>;
   cashoutAviatorBet: () => Promise<{ success: boolean; winAmount: number; multiplier: number } | null>;
   cancelQueuedAviatorBet: () => void;
+  aviatorOverrides: Record<string, number>;
+  adminSetAviatorOverride: (roundId: string, crashPoint: number) => Promise<{ success: boolean; message: string }>;
+  adminClearAviatorOverride: (roundId: string) => Promise<{ success: boolean; message: string }>;
+  getAviatorUpcomingForecast: (count?: number) => AviatorUpcomingResult[];
+  aviatorUpcomingResult: AviatorUpcomingResult;
+
+  // K3 3-Dice Continuous State
+  k3TimeLeft: number;
+  k3CurrentPeriod: string;
+  k3IsLocked: boolean;
+  k3History: K3Period[];
+  k3RevealedResult: K3Period | null;
+  k3IsRevealing: boolean;
+  k3UpcomingResult: K3UpcomingResult;
+  k3Overrides: Record<string, [number, number, number]>;
+  adminSetK3Override: (periodId: string, dice: [number, number, number]) => Promise<{ success: boolean; message: string }>;
+  adminClearK3Override: (periodId: string) => Promise<{ success: boolean; message: string }>;
+  getK3UpcomingForecast: (count?: number) => K3UpcomingResult[];
+  placeK3Bet: (selection: string, amount: number) => Promise<{ success: boolean; message: string }>;
+
+  // TRX Hash Win Go Continuous State
+  trxTimeLeft: number;
+  trxCurrentPeriod: string;
+  trxIsLocked: boolean;
+  trxHistory: TrxPeriod[];
+  trxRevealedResult: TrxPeriod | null;
+  trxIsRevealing: boolean;
+  trxUpcomingResult: TrxUpcomingResult;
+  trxOverrides: Record<string, number>;
+  adminSetTrxOverride: (periodId: string, digit: number) => Promise<{ success: boolean; message: string }>;
+  adminClearTrxOverride: (periodId: string) => Promise<{ success: boolean; message: string }>;
+  getTrxUpcomingForecast: (count?: number) => TrxUpcomingResult[];
+  placeTrxBet: (selection: string, amount: number) => Promise<{ success: boolean; message: string }>;
+
+  // Dragon Tiger Continuous State
+  dtTimeLeft: number;
+  dtCurrentRoundId: string;
+  dtHistory: DragonTigerPeriod[];
+  dtRevealedResult: DragonTigerPeriod | null;
+  dtUpcomingResult: DragonTigerUpcomingResult;
+  dtOverrides: Record<string, 'dragon' | 'tiger' | 'tie'>;
+  adminSetDtOverride: (roundId: string, winner: 'dragon' | 'tiger' | 'tie') => Promise<{ success: boolean; message: string }>;
+  adminClearDtOverride: (roundId: string) => Promise<{ success: boolean; message: string }>;
+  getDtUpcomingForecast: (count?: number) => DragonTigerUpcomingResult[];
+  placeDtBet: (selection: 'dragon' | 'tiger' | 'tie', amount: number) => Promise<{ success: boolean; message: string }>;
 
   // Real-time Cloud Admin Bet Pool Visibility
   liveRoundPool: LiveRoundBetPool | null;
@@ -131,41 +219,26 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   // Global synchronized live bets stream
   const [liveGlobalBets, setLiveGlobalBets] = useState<GlobalBet[]>([]);
 
-  // Helper to derive universal period ID from standard clock:
-  // [current year (4 digits)][current month (2 digits)][current date (2 digits)][4 digits for minutes of the day starting from 12:00 AM]
-  const getPeriodFromTime = (timestampMs: number) => {
-    return getWingoPeriodId(timestampMs);
-  };
-
   // ==========================================
-  // 1. WINGO CLOUD & CLOCK SYNCHRONIZED ENGINE
+  // 1. WINGO STATE & CONTINUOUS TIMELINE
   // ==========================================
-  const [wingoTimeLeft, setWingoTimeLeft] = useState<number>(() => {
-    const sec = Math.floor(Date.now() / 1000) % 60;
-    return 60 - sec;
-  });
-
+  const [wingoTimeLeft, setWingoTimeLeft] = useState<number>(() => 60 - (Math.floor(Date.now() / 1000) % 60));
   const [wingoCurrentPeriod, setWingoCurrentPeriod] = useState<string>(() => getWingoPeriodId(Date.now()));
-  const wingoCurrentPeriodRef = useRef<string>(wingoCurrentPeriod);
-  wingoCurrentPeriodRef.current = wingoCurrentPeriod;
-  
-  // Pre-seed deterministic historical periods strictly starting from 1 before the active round
-  const [wingoHistory, setWingoHistory] = useState<WingoPeriod[]>(() => {
-    const active = getWingoPeriodId(Date.now());
-    return generateHistoricalPeriods(60, active);
-  });
-  
+  const [wingoHistory, setWingoHistory] = useState<WingoPeriod[]>(() => generateHistoricalPeriods(60));
   const [wingoRevealedResult, setWingoRevealedResult] = useState<WingoPeriod | null>(null);
   const [wingoIsRevealing, setWingoIsRevealing] = useState<boolean>(false);
   const [wingoPendingBets, setWingoPendingBets] = useState<PendingWingoBet[]>([]);
-  const wingoPendingBetsRef = useRef<PendingWingoBet[]>([]);
+
+  const wingoCurrentPeriodRef = useRef<string>(wingoCurrentPeriod);
+  wingoCurrentPeriodRef.current = wingoCurrentPeriod;
+  const wingoPendingBetsRef = useRef<PendingWingoBet[]>(wingoPendingBets);
   wingoPendingBetsRef.current = wingoPendingBets;
 
-  // Admin round override registry (stores custom pre-set outcomes for upcoming or active periods)
+  // Wingo Overrides
   const [wingoOverrides, setWingoOverrides] = useState<Record<string, number>>(() => {
     try {
-      const saved = localStorage.getItem('winxbet_wingo_overrides');
-      return saved ? JSON.parse(saved) : {};
+      const stored = localStorage.getItem('winxbet_wingo_overrides');
+      return stored ? JSON.parse(stored) : {};
     } catch {
       return {};
     }
@@ -173,80 +246,51 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   const wingoOverridesRef = useRef<Record<string, number>>(wingoOverrides);
   wingoOverridesRef.current = wingoOverrides;
 
-  // Real-time Firestore sync for cloud-wide synchronized admin overrides
   useEffect(() => {
     try {
       const docRef = doc(db, 'system', 'wingoOverrides');
       const unsub = onSnapshot(docRef, (snap) => {
         if (snap.exists()) {
           const data = snap.data() as Record<string, number>;
-          setWingoOverrides((prev) => {
-            const merged = { ...prev, ...data };
-            try {
-              localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(merged));
-            } catch {}
-            return merged;
-          });
+          setWingoOverrides((prev) => ({ ...prev, ...data }));
         }
-      }, (err) => {
-        console.warn('Wingo overrides cloud listener notice:', err);
       });
       return () => unsub();
-    } catch (e) {
-      console.warn('Wingo overrides setup error:', e);
-    }
+    } catch {}
   }, []);
 
-  const adminSetWingoOverride = useCallback(async (periodId: string, targetNumber: number): Promise<{ success: boolean; message: string }> => {
-    if (targetNumber < 0 || targetNumber > 9) {
-      return { success: false, message: 'Invalid target number. Must be between 0 and 9.' };
-    }
-    setWingoOverrides((prev) => {
+  const adminSetWingoOverride = useCallback(async (periodId: string, targetNumber: number) => {
+    if (targetNumber < 0 || targetNumber > 9) return { success: false, message: 'Invalid target number (0-9).' };
+    setWingoOverrides(prev => {
       const next = { ...prev, [periodId]: targetNumber };
-      try {
-        localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next));
-      } catch {}
+      try { localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next)); } catch {}
       return next;
     });
-
     try {
       await setDoc(doc(db, 'system', 'wingoOverrides'), { [periodId]: targetNumber }, { merge: true });
-    } catch (err) {
-      console.warn('Error saving override to Firestore:', err);
-    }
-
-    return { success: true, message: `Round #${periodId} result locked to Number ${targetNumber}!` };
+    } catch {}
+    return { success: true, message: `WinGo Round #${periodId} result locked to Number ${targetNumber}!` };
   }, []);
 
-  const adminClearWingoOverride = useCallback(async (periodId: string): Promise<{ success: boolean; message: string }> => {
-    setWingoOverrides((prev) => {
+  const adminClearWingoOverride = useCallback(async (periodId: string) => {
+    setWingoOverrides(prev => {
       const next = { ...prev };
       delete next[periodId];
-      try {
-        localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next));
-      } catch {}
+      try { localStorage.setItem('winxbet_wingo_overrides', JSON.stringify(next)); } catch {}
       return next;
     });
-
     try {
-      await updateDoc(doc(db, 'system', 'wingoOverrides'), {
-        [periodId]: deleteField()
-      });
-    } catch (err) {
-      console.warn('Error clearing override in Firestore:', err);
-    }
-
-    return { success: true, message: `Round #${periodId} reset to provably fair deterministic lottery.` };
+      await updateDoc(doc(db, 'system', 'wingoOverrides'), { [periodId]: deleteField() });
+    } catch {}
+    return { success: true, message: `WinGo Round #${periodId} reset to provably fair deterministic lottery.` };
   }, []);
 
-  // Live pre-session result peek for the currently active period before it concludes
-  const wingoUpcomingResult = useMemo<WingoUpcomingResult>(() => {
-    const periodId = wingoCurrentPeriod;
-    const hasOverride = wingoOverrides[periodId] !== undefined;
-    const det = getDeterministicRoundResult(periodId);
-    const num = hasOverride ? wingoOverrides[periodId] : det.number;
+  const wingoUpcomingResult = useMemo((): WingoUpcomingResult => {
+    const hasOverride = wingoOverrides[wingoCurrentPeriod] !== undefined;
+    const det = getDeterministicRoundResult(wingoCurrentPeriod);
+    const num = hasOverride ? wingoOverrides[wingoCurrentPeriod] : det.number;
     return {
-      periodId,
+      periodId: wingoCurrentPeriod,
       number: num,
       colors: getNumberColors(num),
       size: getNumberSize(num),
@@ -256,7 +300,6 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
     };
   }, [wingoCurrentPeriod, wingoOverrides, wingoTimeLeft]);
 
-  // Multi-period future forecast (next N rounds)
   const getWingoUpcomingForecast = useCallback((count: number = 6): WingoUpcomingResult[] => {
     const list: WingoUpcomingResult[] = [];
     let curPeriod = wingoCurrentPeriod;
@@ -279,91 +322,397 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   }, [wingoCurrentPeriod, wingoOverrides, wingoTimeLeft]);
 
   const wingoIsLocked = wingoTimeLeft <= 5;
-
   const registerWingoBet = useCallback((bet: PendingWingoBet) => {
     setWingoPendingBets(prev => [...prev, bet]);
   }, []);
 
-  // Connect to Firestore collection 'wingoRounds' to guarantee ALL users see the EXACT same results
+  // ==========================================
+  // 2. K3 3-DICE CONTINUOUS TIMELINE
+  // ==========================================
+  const [k3TimeLeft, setK3TimeLeft] = useState<number>(() => 60 - (Math.floor(Date.now() / 1000) % 60));
+  const [k3CurrentPeriod, setK3CurrentPeriod] = useState<string>(() => getK3PeriodId(Date.now()));
+  const [k3History, setK3History] = useState<K3Period[]>(() => generateHistoricalK3Periods(40));
+  const [k3RevealedResult, setK3RevealedResult] = useState<K3Period | null>(null);
+  const [k3IsRevealing, setK3IsRevealing] = useState<boolean>(false);
+  const [k3PendingBets, setK3PendingBets] = useState<PendingGameBet[]>([]);
+
+  const k3CurrentPeriodRef = useRef<string>(k3CurrentPeriod);
+  k3CurrentPeriodRef.current = k3CurrentPeriod;
+  const k3PendingBetsRef = useRef<PendingGameBet[]>(k3PendingBets);
+  k3PendingBetsRef.current = k3PendingBets;
+
+  const [k3Overrides, setK3Overrides] = useState<Record<string, [number, number, number]>>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_k3_overrides');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+  const k3OverridesRef = useRef<Record<string, [number, number, number]>>(k3Overrides);
+  k3OverridesRef.current = k3Overrides;
+
   useEffect(() => {
-    const qWingo = query(
-      collection(db, 'wingoRounds'),
-      orderBy('timestamp', 'desc'),
-      limit(60)
-    );
-
-    const unsubscribeWingo = onSnapshot(qWingo, (snap) => {
-      if (!snap.empty) {
-        const cloudMap = new Map<string, WingoPeriod>();
-        snap.forEach((docSnap) => {
-          const d = docSnap.data();
-          let pid = String(d.periodId || docSnap.id);
-          // Standardize periodId to 12 digits matching authoritative timeline
-          if (d.timestamp) {
-            const expectedId = getWingoPeriodId(Number(d.timestamp));
-            if (pid !== expectedId && /^\d{12}$/.test(expectedId)) {
-              pid = expectedId;
-            }
-          }
-          if (/^\d{12}$/.test(pid)) {
-            cloudMap.set(pid, {
-              periodId: pid,
-              number: Number(d.number) || 0,
-              colors: d.colors || getNumberColors(Number(d.number) || 0),
-              size: d.size || getNumberSize(Number(d.number) || 0),
-              hash: d.hash || 'PROVABLY_FAIR',
-              time: d.time || new Date(d.timestamp || Date.now()).toLocaleTimeString(),
-              timestamp: Number(d.timestamp) || Date.now()
-            });
-          }
-        });
-
-        // Reconcile into an unbroken, strictly consecutive history
-        setWingoHistory(prev => {
-          const active = wingoCurrentPeriodRef.current || getWingoPeriodId(Date.now());
-          const latestCompletedId = getPreviousPeriodId(active);
-          const resultChain: WingoPeriod[] = [];
-          let curId = latestCompletedId;
-
-          for (let i = 0; i < 60; i++) {
-            const fromCloud = cloudMap.get(curId);
-            const fromPrev = prev.find(p => p.periodId === curId);
-
-            if (fromCloud) {
-              resultChain.push(fromCloud);
-            } else if (fromPrev) {
-              resultChain.push(fromPrev);
-            } else {
-              const det = getDeterministicRoundResult(curId);
-              const seq = parseInt(curId.slice(8), 10);
-              const minuteOfDay = Math.max(0, seq - 1);
-              const hour = Math.floor(minuteOfDay / 60);
-              const minute = minuteOfDay % 60;
-              resultChain.push({
-                periodId: curId,
-                number: det.number,
-                colors: det.colors,
-                size: det.size,
-                hash: det.hash,
-                time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
-                timestamp: Date.now() - (i + 1) * 60000
-              });
-            }
-            curId = getPreviousPeriodId(curId);
-          }
-
-          return resultChain;
-        });
-      }
-    }, (err) => {
-      console.warn('Wingo rounds cloud listener notice:', err);
-    });
-
-    return () => unsubscribeWingo();
+    try {
+      const unsub = onSnapshot(doc(db, 'system', 'k3Overrides'), (snap) => {
+        if (snap.exists()) {
+          setK3Overrides(prev => ({ ...prev, ...(snap.data() as any) }));
+        }
+      });
+      return () => unsub();
+    } catch {}
   }, []);
 
-  // Continuous Clock Synchronizer for WinGo
+  const adminSetK3Override = useCallback(async (periodId: string, dice: [number, number, number]) => {
+    setK3Overrides(prev => {
+      const next = { ...prev, [periodId]: dice };
+      try { localStorage.setItem('winxbet_k3_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await setDoc(doc(db, 'system', 'k3Overrides'), { [periodId]: dice }, { merge: true });
+    } catch {}
+    return { success: true, message: `K3 Round #${periodId} locked to Dice [${dice.join(', ')}] (Sum: ${dice[0] + dice[1] + dice[2]})!` };
+  }, []);
+
+  const adminClearK3Override = useCallback(async (periodId: string) => {
+    setK3Overrides(prev => {
+      const next = { ...prev };
+      delete next[periodId];
+      try { localStorage.setItem('winxbet_k3_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await updateDoc(doc(db, 'system', 'k3Overrides'), { [periodId]: deleteField() });
+    } catch {}
+    return { success: true, message: `K3 Round #${periodId} reset to provably fair deterministic roll.` };
+  }, []);
+
+  const k3UpcomingResult = useMemo((): K3UpcomingResult => {
+    const hasOverride = k3Overrides[k3CurrentPeriod] !== undefined;
+    const periodData = getK3PeriodData(k3CurrentPeriod, k3Overrides[k3CurrentPeriod]);
+    return {
+      periodId: k3CurrentPeriod,
+      dice: periodData.dice,
+      total: periodData.total,
+      size: periodData.size,
+      parity: periodData.parity,
+      isTriple: periodData.isTriple,
+      isDouble: periodData.isDouble,
+      isOverridden: hasOverride,
+      timeLeft: k3TimeLeft
+    };
+  }, [k3CurrentPeriod, k3Overrides, k3TimeLeft]);
+
+  const getK3UpcomingForecast = useCallback((count: number = 6): K3UpcomingResult[] => {
+    const list: K3UpcomingResult[] = [];
+    const now = Date.now();
+    for (let i = 0; i < count; i++) {
+      const targetTime = now + i * 60000;
+      const pId = getK3PeriodId(targetTime);
+      const hasOverride = k3Overrides[pId] !== undefined;
+      const pData = getK3PeriodData(pId, k3Overrides[pId], targetTime);
+      list.push({
+        periodId: pId,
+        dice: pData.dice,
+        total: pData.total,
+        size: pData.size,
+        parity: pData.parity,
+        isTriple: pData.isTriple,
+        isDouble: pData.isDouble,
+        isOverridden: hasOverride,
+        timeLeft: i === 0 ? k3TimeLeft : i * 60 + k3TimeLeft
+      });
+    }
+    return list;
+  }, [k3Overrides, k3TimeLeft]);
+
+  const k3IsLocked = k3TimeLeft <= 5;
+
+  const placeK3Bet = async (selection: string, amount: number) => {
+    if (k3IsLocked) return { success: false, message: 'Betting is locked for current round' };
+    const res = await placeBet({
+      gameType: 'k3',
+      periodId: k3CurrentPeriod,
+      selection,
+      amount,
+      multiplier: 1
+    });
+    if (res.success && res.betId) {
+      setK3PendingBets(prev => [...prev, {
+        betId: res.betId!,
+        gameType: 'k3',
+        periodId: k3CurrentPeriod,
+        selection,
+        amount,
+        multiplier: 1,
+        netAmount: res.netAmount,
+        fee: res.fee
+      }]);
+      triggerHaptic('medium');
+      return { success: true, message: `Bet of ₹${amount} placed on ${selection}!` };
+    }
+    return { success: false, message: res.message };
+  };
+
+  // ==========================================
+  // 3. TRX HASH WIN GO CONTINUOUS TIMELINE
+  // ==========================================
+  const [trxTimeLeft, setTrxTimeLeft] = useState<number>(() => 60 - (Math.floor(Date.now() / 1000) % 60));
+  const [trxCurrentPeriod, setTrxCurrentPeriod] = useState<string>(() => getTrxPeriodId(Date.now()));
+  const [trxHistory, setTrxHistory] = useState<TrxPeriod[]>(() => generateHistoricalTrxPeriods(40));
+  const [trxRevealedResult, setTrxRevealedResult] = useState<TrxPeriod | null>(null);
+  const [trxIsRevealing, setTrxIsRevealing] = useState<boolean>(false);
+  const [trxPendingBets, setTrxPendingBets] = useState<PendingGameBet[]>([]);
+
+  const trxCurrentPeriodRef = useRef<string>(trxCurrentPeriod);
+  trxCurrentPeriodRef.current = trxCurrentPeriod;
+  const trxPendingBetsRef = useRef<PendingGameBet[]>(trxPendingBets);
+  trxPendingBetsRef.current = trxPendingBets;
+
+  const [trxOverrides, setTrxOverrides] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_trx_overrides');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+  const trxOverridesRef = useRef<Record<string, number>>(trxOverrides);
+  trxOverridesRef.current = trxOverrides;
+
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(doc(db, 'system', 'trxOverrides'), (snap) => {
+        if (snap.exists()) {
+          setTrxOverrides(prev => ({ ...prev, ...(snap.data() as any) }));
+        }
+      });
+      return () => unsub();
+    } catch {}
+  }, []);
+
+  const adminSetTrxOverride = useCallback(async (periodId: string, digit: number) => {
+    if (digit < 0 || digit > 9) return { success: false, message: 'Invalid target digit (0-9).' };
+    setTrxOverrides(prev => {
+      const next = { ...prev, [periodId]: digit };
+      try { localStorage.setItem('winxbet_trx_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await setDoc(doc(db, 'system', 'trxOverrides'), { [periodId]: digit }, { merge: true });
+    } catch {}
+    return { success: true, message: `TRX Round #${periodId} block result locked to Digit ${digit}!` };
+  }, []);
+
+  const adminClearTrxOverride = useCallback(async (periodId: string) => {
+    setTrxOverrides(prev => {
+      const next = { ...prev };
+      delete next[periodId];
+      try { localStorage.setItem('winxbet_trx_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await updateDoc(doc(db, 'system', 'trxOverrides'), { [periodId]: deleteField() });
+    } catch {}
+    return { success: true, message: `TRX Round #${periodId} reset to provably fair block hash.` };
+  }, []);
+
+  const trxUpcomingResult = useMemo((): TrxUpcomingResult => {
+    const hasOverride = trxOverrides[trxCurrentPeriod] !== undefined;
+    const periodData = getDeterministicTrxData(trxCurrentPeriod, trxOverrides[trxCurrentPeriod]);
+    return {
+      periodId: trxCurrentPeriod,
+      blockNumber: periodData.blockNumber,
+      blockHash: periodData.blockHash,
+      lastDigit: periodData.lastDigit,
+      colors: periodData.colors,
+      size: periodData.size,
+      isOverridden: hasOverride,
+      timeLeft: trxTimeLeft
+    };
+  }, [trxCurrentPeriod, trxOverrides, trxTimeLeft]);
+
+  const getTrxUpcomingForecast = useCallback((count: number = 6): TrxUpcomingResult[] => {
+    const list: TrxUpcomingResult[] = [];
+    const now = Date.now();
+    for (let i = 0; i < count; i++) {
+      const targetTime = now + i * 60000;
+      const pId = getTrxPeriodId(targetTime);
+      const hasOverride = trxOverrides[pId] !== undefined;
+      const pData = getDeterministicTrxData(pId, trxOverrides[pId], targetTime);
+      list.push({
+        periodId: pId,
+        blockNumber: pData.blockNumber,
+        blockHash: pData.blockHash,
+        lastDigit: pData.lastDigit,
+        colors: pData.colors,
+        size: pData.size,
+        isOverridden: hasOverride,
+        timeLeft: i === 0 ? trxTimeLeft : i * 60 + trxTimeLeft
+      });
+    }
+    return list;
+  }, [trxOverrides, trxTimeLeft]);
+
+  const trxIsLocked = trxTimeLeft <= 5;
+
+  const placeTrxBet = async (selection: string, amount: number) => {
+    if (trxIsLocked) return { success: false, message: 'Betting is locked for current round' };
+    const res = await placeBet({
+      gameType: 'trx',
+      periodId: trxCurrentPeriod,
+      selection,
+      amount,
+      multiplier: 1
+    });
+    if (res.success && res.betId) {
+      setTrxPendingBets(prev => [...prev, {
+        betId: res.betId!,
+        gameType: 'trx',
+        periodId: trxCurrentPeriod,
+        selection,
+        amount,
+        multiplier: 1,
+        netAmount: res.netAmount,
+        fee: res.fee
+      }]);
+      triggerHaptic('medium');
+      return { success: true, message: `Bet of ₹${amount} placed on ${selection}!` };
+    }
+    return { success: false, message: res.message };
+  };
+
+  // ==========================================
+  // 4. DRAGON TIGER CONTINUOUS TIMELINE (18s CYCLE)
+  // ==========================================
+  const DT_CYCLE_MS = 18000;
+  const [dtTimeLeft, setDtTimeLeft] = useState<number>(() => {
+    const rem = DT_CYCLE_MS - (Date.now() % DT_CYCLE_MS);
+    return Math.floor(rem / 1000);
+  });
+  const [dtCurrentRoundId, setDtCurrentRoundId] = useState<string>(() => `DT-${Math.floor(Date.now() / DT_CYCLE_MS)}`);
+  const [dtHistory, setDtHistory] = useState<DragonTigerPeriod[]>(() => generateHistoricalDragonTiger(30));
+  const [dtRevealedResult, setDtRevealedResult] = useState<DragonTigerPeriod | null>(null);
+  const [dtPendingBets, setDtPendingBets] = useState<PendingGameBet[]>([]);
+
+  const dtCurrentRoundIdRef = useRef<string>(dtCurrentRoundId);
+  dtCurrentRoundIdRef.current = dtCurrentRoundId;
+  const dtPendingBetsRef = useRef<PendingGameBet[]>(dtPendingBets);
+  dtPendingBetsRef.current = dtPendingBets;
+
+  const [dtOverrides, setDtOverrides] = useState<Record<string, 'dragon' | 'tiger' | 'tie'>>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_dt_overrides');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+  const dtOverridesRef = useRef<Record<string, 'dragon' | 'tiger' | 'tie'>>(dtOverrides);
+  dtOverridesRef.current = dtOverrides;
+
+  useEffect(() => {
+    try {
+      const unsub = onSnapshot(doc(db, 'system', 'dtOverrides'), (snap) => {
+        if (snap.exists()) {
+          setDtOverrides(prev => ({ ...prev, ...(snap.data() as any) }));
+        }
+      });
+      return () => unsub();
+    } catch {}
+  }, []);
+
+  const adminSetDtOverride = useCallback(async (roundId: string, winner: 'dragon' | 'tiger' | 'tie') => {
+    setDtOverrides(prev => {
+      const next = { ...prev, [roundId]: winner };
+      try { localStorage.setItem('winxbet_dt_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await setDoc(doc(db, 'system', 'dtOverrides'), { [roundId]: winner }, { merge: true });
+    } catch {}
+    return { success: true, message: `Dragon Tiger Round #${roundId} locked to Winner: ${winner.toUpperCase()}!` };
+  }, []);
+
+  const adminClearDtOverride = useCallback(async (roundId: string) => {
+    setDtOverrides(prev => {
+      const next = { ...prev };
+      delete next[roundId];
+      try { localStorage.setItem('winxbet_dt_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await updateDoc(doc(db, 'system', 'dtOverrides'), { [roundId]: deleteField() });
+    } catch {}
+    return { success: true, message: `Dragon Tiger Round #${roundId} reset to provably fair deck deal.` };
+  }, []);
+
+  const dtUpcomingResult = useMemo((): DragonTigerUpcomingResult => {
+    const hasOverride = dtOverrides[dtCurrentRoundId] !== undefined;
+    const det = getDeterministicDragonTiger(dtCurrentRoundId);
+    let finalWinner = hasOverride ? dtOverrides[dtCurrentRoundId] : det.winner;
+    return {
+      roundId: dtCurrentRoundId,
+      dragonCard: det.dragonCard,
+      tigerCard: det.tigerCard,
+      winner: finalWinner,
+      isOverridden: hasOverride,
+      timeLeft: dtTimeLeft
+    };
+  }, [dtCurrentRoundId, dtOverrides, dtTimeLeft]);
+
+  const getDtUpcomingForecast = useCallback((count: number = 6): DragonTigerUpcomingResult[] => {
+    const list: DragonTigerUpcomingResult[] = [];
+    const now = Date.now();
+    const baseIdx = Math.floor(now / DT_CYCLE_MS);
+    for (let i = 0; i < count; i++) {
+      const rId = `DT-${baseIdx + i}`;
+      const hasOverride = dtOverrides[rId] !== undefined;
+      const det = getDeterministicDragonTiger(rId);
+      list.push({
+        roundId: rId,
+        dragonCard: det.dragonCard,
+        tigerCard: det.tigerCard,
+        winner: hasOverride ? dtOverrides[rId] : det.winner,
+        isOverridden: hasOverride,
+        timeLeft: i === 0 ? dtTimeLeft : i * 18 + dtTimeLeft
+      });
+    }
+    return list;
+  }, [dtOverrides, dtTimeLeft]);
+
+  const placeDtBet = async (selection: 'dragon' | 'tiger' | 'tie', amount: number) => {
+    if (dtTimeLeft <= 4) return { success: false, message: 'Cards are being dealt. Wait for next round.' };
+    const res = await placeBet({
+      gameType: 'dragontiger',
+      periodId: dtCurrentRoundId,
+      selection,
+      amount,
+      multiplier: 1
+    });
+    if (res.success && res.betId) {
+      setDtPendingBets(prev => [...prev, {
+        betId: res.betId!,
+        gameType: 'dragontiger',
+        periodId: dtCurrentRoundId,
+        selection,
+        amount,
+        multiplier: 1,
+        netAmount: res.netAmount,
+        fee: res.fee
+      }]);
+      triggerHaptic('medium');
+      return { success: true, message: `Bet of ₹${amount} placed on ${selection.toUpperCase()}!` };
+    }
+    return { success: false, message: res.message };
+  };
+
+  // ==========================================
+  // 5. MASTER 1-SECOND INTERVAL FOR LOTTERIES (WinGo, K3, TRX, DragonTiger)
+  // ==========================================
   const lastProcessedMinuteRef = useRef<number>(Math.floor(Date.now() / 60000));
+  const lastProcessedDtRoundRef = useRef<number>(Math.floor(Date.now() / DT_CYCLE_MS));
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -373,98 +722,158 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       const remaining = 60 - sec;
 
       setWingoTimeLeft(remaining);
+      setK3TimeLeft(remaining);
+      setTrxTimeLeft(remaining);
 
-      // Detect round rollover
-      if (currentMinute > lastProcessedMinuteRef.current) {
-        lastProcessedMinuteRef.current = currentMinute;
+      // DragonTiger timer (18s cycle)
+      const dtRem = Math.max(0, Math.floor((DT_CYCLE_MS - (now % DT_CYCLE_MS)) / 1000));
+      setDtTimeLeft(dtRem);
 
-        // Current active period that just concluded
-        const resolvedPeriodId = wingoCurrentPeriodRef.current || getWingoPeriodId(now - 60000);
-        // Next active round is strictly 1 more than resolvedPeriodId
-        const nextPeriodId = getNextPeriodId(resolvedPeriodId);
-        
-        setWingoCurrentPeriod(nextPeriodId);
-        wingoCurrentPeriodRef.current = nextPeriodId;
+      // Handle DragonTiger round rollover
+      const currentDtRound = Math.floor(now / DT_CYCLE_MS);
+      if (currentDtRound > lastProcessedDtRoundRef.current) {
+        lastProcessedDtRoundRef.current = currentDtRound;
+        const resolvedDtRoundId = `DT-${currentDtRound - 1}`;
+        const nextDtRoundId = `DT-${currentDtRound}`;
+        setDtCurrentRoundId(nextDtRoundId);
 
-        // Compute provably fair deterministic result or respect admin override for this period
-        const overrideNum = wingoOverridesRef.current[resolvedPeriodId];
-        const deterministic = getDeterministicRoundResult(resolvedPeriodId);
-        const finalNumber = overrideNum !== undefined ? overrideNum : deterministic.number;
-        const finalColors = getNumberColors(finalNumber);
-        const finalSize = getNumberSize(finalNumber);
-        const finalHash = deterministic.hash;
+        const hasOverride = dtOverridesRef.current[resolvedDtRoundId] !== undefined;
+        const det = getDeterministicDragonTiger(resolvedDtRoundId);
+        const finalWinner = hasOverride ? dtOverridesRef.current[resolvedDtRoundId] : det.winner;
         const d = new Date(now);
         const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
 
-        const newPeriod: WingoPeriod = {
-          periodId: resolvedPeriodId,
-          number: finalNumber,
-          colors: finalColors,
-          size: finalSize,
-          hash: finalHash,
+        const completedDtRound: DragonTigerPeriod = {
+          roundId: resolvedDtRoundId,
+          dragonCard: det.dragonCard,
+          tigerCard: det.tigerCard,
+          winner: finalWinner,
           time: timeStr,
           timestamp: now
         };
 
-        // Write to shared Firestore collection so all users across the world receive it identically
-        const roundRef = doc(db, 'wingoRounds', resolvedPeriodId);
-        setDoc(roundRef, {
-          ...newPeriod,
+        setDtRevealedResult(completedDtRound);
+        setDtHistory(prev => [completedDtRound, ...prev.slice(0, 39)]);
+
+        // Settle pending DT bets
+        const pending = dtPendingBetsRef.current.filter(b => b.periodId === resolvedDtRoundId);
+        pending.forEach(b => {
+          const won = b.selection === finalWinner;
+          const mult = finalWinner === 'tie' ? 9.0 : 2.0;
+          const netWager = b.netAmount ?? Number((b.amount * (1 - 0.03)).toFixed(4));
+          const winAmount = won ? Number((netWager * mult).toFixed(2)) : 0;
+          settleBet(b.betId, won, winAmount, 0);
+        });
+        setDtPendingBets(prev => prev.filter(b => b.periodId !== resolvedDtRoundId));
+      }
+
+      // Handle 1-minute round rollover for WinGo, K3, and TRX
+      if (currentMinute > lastProcessedMinuteRef.current) {
+        lastProcessedMinuteRef.current = currentMinute;
+
+        // ---- A. WINGO ROLLOVER ----
+        const resolvedWingoId = wingoCurrentPeriodRef.current || getWingoPeriodId(now - 60000);
+        const nextWingoId = getNextPeriodId(resolvedWingoId);
+        setWingoCurrentPeriod(nextWingoId);
+        wingoCurrentPeriodRef.current = nextWingoId;
+
+        const overrideNum = wingoOverridesRef.current[resolvedWingoId];
+        const deterministic = getDeterministicRoundResult(resolvedWingoId);
+        const finalNumber = overrideNum !== undefined ? overrideNum : deterministic.number;
+        const finalColors = getNumberColors(finalNumber);
+        const finalSize = getNumberSize(finalNumber);
+        const d = new Date(now);
+        const timeStr = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
+
+        const newWingoPeriod: WingoPeriod = {
+          periodId: resolvedWingoId,
+          number: finalNumber,
+          colors: finalColors,
+          size: finalSize,
+          hash: deterministic.hash,
+          time: timeStr,
+          timestamp: now
+        };
+
+        setDoc(doc(db, 'wingoRounds', resolvedWingoId), {
+          ...newWingoPeriod,
           status: 'completed',
           updatedAt: now
-        }, { merge: true }).catch((err) => {
-          console.warn('Silent wingo round cloud sync notice:', err);
-        });
+        }, { merge: true }).catch(() => {});
 
-        // Trigger reveal animation and display
-        setWingoRevealedResult(newPeriod);
+        setWingoRevealedResult(newWingoPeriod);
         setWingoIsRevealing(true);
         setTimeout(() => setWingoIsRevealing(false), 3000);
 
-        // Settle matching pending bets for this period using the authoritative final number
-        const currentPending = wingoPendingBetsRef.current;
-        const matching = currentPending.filter(b => b.periodId === resolvedPeriodId);
-        matching.forEach(bet => {
+        const currentWingoPending = wingoPendingBetsRef.current;
+        const matchingWingo = currentWingoPending.filter(b => b.periodId === resolvedWingoId);
+        matchingWingo.forEach(bet => {
           const netWager = bet.netAmount ?? Number((bet.amount * bet.multiplier * (1 - 0.03)).toFixed(4));
           const result = calculateBetResult(bet.selection, netWager, finalNumber);
           settleBet(bet.betId, result.won, result.winAmount, finalNumber);
         });
+        setWingoPendingBets(prev => prev.filter(b => b.periodId !== resolvedWingoId));
+        setWingoHistory(prev => [newWingoPeriod, ...prev.filter(p => p.periodId !== resolvedWingoId).slice(0, 59)]);
 
-        setWingoPendingBets(prev => prev.filter(b => b.periodId !== resolvedPeriodId));
+        // ---- B. K3 ROLLOVER ----
+        const resolvedK3Id = k3CurrentPeriodRef.current || getK3PeriodId(now - 60000);
+        const nextK3Id = getK3PeriodId(now);
+        setK3CurrentPeriod(nextK3Id);
+        k3CurrentPeriodRef.current = nextK3Id;
 
-        // Prepend new resolved period to history, guaranteeing strictly consecutive sequence:
-        // History[0] is resolvedPeriodId (which is nextPeriodId - 1)
-        // History[1] is resolvedPeriodId - 1, etc.
-        setWingoHistory(prev => {
-          const updated = [newPeriod, ...prev.filter(p => p.periodId !== resolvedPeriodId)];
-          const continuousHistory: WingoPeriod[] = [newPeriod];
-          let prevId = newPeriod.periodId;
+        const overrideK3Dice = k3OverridesRef.current[resolvedK3Id];
+        const newK3Period = getK3PeriodData(resolvedK3Id, overrideK3Dice, now);
 
-          for (let i = 1; i < 60; i++) {
-            const expectedId = getPreviousPeriodId(prevId);
-            const found = updated.find(p => p.periodId === expectedId);
-            if (found) {
-              continuousHistory.push(found);
-            } else {
-              const det = getDeterministicRoundResult(expectedId);
-              const seq = parseInt(expectedId.slice(8), 10);
-              const minuteOfDay = Math.max(0, seq - 1);
-              const hour = Math.floor(minuteOfDay / 60);
-              const minute = minuteOfDay % 60;
-              continuousHistory.push({
-                periodId: expectedId,
-                number: det.number,
-                colors: det.colors,
-                size: det.size,
-                hash: det.hash,
-                time: `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}:00`,
-                timestamp: now - i * 60000
-              });
-            }
-            prevId = expectedId;
-          }
-          return continuousHistory;
+        setDoc(doc(db, 'k3Rounds', resolvedK3Id), {
+          ...newK3Period,
+          status: 'completed',
+          updatedAt: now
+        }, { merge: true }).catch(() => {});
+
+        setK3RevealedResult(newK3Period);
+        setK3IsRevealing(true);
+        setTimeout(() => setK3IsRevealing(false), 3000);
+
+        const currentK3Pending = k3PendingBetsRef.current;
+        const matchingK3 = currentK3Pending.filter(b => b.periodId === resolvedK3Id);
+        matchingK3.forEach(bet => {
+          const netWager = bet.netAmount ?? Number((bet.amount * (1 - 0.03)).toFixed(4));
+          const res = calculateK3BetResult(bet.selection, newK3Period);
+          const winAmount = res.won ? Number((netWager * res.multiplier).toFixed(2)) : 0;
+          settleBet(bet.betId, res.won, winAmount, newK3Period.total);
         });
+        setK3PendingBets(prev => prev.filter(b => b.periodId !== resolvedK3Id));
+        setK3History(prev => [newK3Period, ...prev.filter(p => p.periodId !== resolvedK3Id).slice(0, 39)]);
+
+        // ---- C. TRX ROLLOVER ----
+        const resolvedTrxId = trxCurrentPeriodRef.current || getTrxPeriodId(now - 60000);
+        const nextTrxId = getTrxPeriodId(now);
+        setTrxCurrentPeriod(nextTrxId);
+        trxCurrentPeriodRef.current = nextTrxId;
+
+        const overrideTrxDigit = trxOverridesRef.current[resolvedTrxId];
+        const newTrxPeriod = getDeterministicTrxData(resolvedTrxId, overrideTrxDigit, now);
+
+        setDoc(doc(db, 'trxRounds', resolvedTrxId), {
+          ...newTrxPeriod,
+          status: 'completed',
+          updatedAt: now
+        }, { merge: true }).catch(() => {});
+
+        setTrxRevealedResult(newTrxPeriod);
+        setTrxIsRevealing(true);
+        setTimeout(() => setTrxIsRevealing(false), 3000);
+
+        const currentTrxPending = trxPendingBetsRef.current;
+        const matchingTrx = currentTrxPending.filter(b => b.periodId === resolvedTrxId);
+        matchingTrx.forEach(bet => {
+          const netWager = bet.netAmount ?? Number((bet.amount * (1 - 0.03)).toFixed(4));
+          const res = calculateTrxBetResult(bet.selection, newTrxPeriod);
+          const winAmount = res.won ? Number((netWager * res.multiplier).toFixed(2)) : 0;
+          settleBet(bet.betId, res.won, winAmount, newTrxPeriod.lastDigit);
+        });
+        setTrxPendingBets(prev => prev.filter(b => b.periodId !== resolvedTrxId));
+        setTrxHistory(prev => [newTrxPeriod, ...prev.filter(p => p.periodId !== resolvedTrxId).slice(0, 39)]);
       }
     }, 1000);
 
@@ -472,15 +881,14 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   }, [settleBet]);
 
   // ==========================================
-  // 2. AVIATOR CLOUD & EPOCH SYNCHRONIZED ENGINE
+  // 6. AVIATOR CLOUD & AUTHENTIC SPRIBE ENGINE (Slower, Thrilling, Realistic)
   // ==========================================
-  // Universal 20-second flight round cycle
-  // Every client on Earth calculates the exact same roundId, flight time, multiplier, and crash point
-  const AVIATOR_CYCLE_MS = 20000;
-  const COUNTDOWN_DURATION_MS = 4000;
+  // Cycle length: 38s (6s betting countdown + smooth flight + 4s crash celebration)
+  const AVIATOR_CYCLE_MS = 38000;
+  const COUNTDOWN_DURATION_MS = 6000;
 
   const [aviatorPhase, setAviatorPhase] = useState<'countdown' | 'flying' | 'crashed'>('countdown');
-  const [aviatorCountdownLeft, setAviatorCountdownLeft] = useState<number>(4.0);
+  const [aviatorCountdownLeft, setAviatorCountdownLeft] = useState<number>(6.0);
   const [aviatorCurrentRoundId, setAviatorCurrentRoundId] = useState<string>(() => `AV-${Math.floor(Date.now() / AVIATOR_CYCLE_MS)}`);
   const [aviatorMultiplier, setAviatorMultiplier] = useState<number>(1.00);
   const [aviatorCrashPoint, setAviatorCrashPoint] = useState<number>(() => {
@@ -488,9 +896,7 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
     return getDeterministicAviatorCrash(currentRoundIdx);
   });
 
-  const [aviatorHistory, setAviatorHistory] = useState<AviatorRoundRecord[]>(() => {
-    return generateHistoricalAviatorRounds(90);
-  });
+  const [aviatorHistory, setAviatorHistory] = useState<AviatorRoundRecord[]>(() => generateHistoricalAviatorRounds(60));
   const [aviatorRecentMultipliers, setAviatorRecentMultipliers] = useState<number[]>([
     1.85, 2.40, 1.12, 5.40, 1.45, 12.80, 1.05, 3.20, 2.10, 8.75
   ]);
@@ -507,51 +913,92 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   const aviatorQueuedNextBetRef = useRef<any>(null);
   aviatorQueuedNextBetRef.current = aviatorQueuedNextBet;
 
-  // Cloud listener for Aviator historical rounds from Firestore
+  // Aviator Admin Overrides
+  const [aviatorOverrides, setAviatorOverrides] = useState<Record<string, number>>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_aviator_overrides');
+      return stored ? JSON.parse(stored) : {};
+    } catch {
+      return {};
+    }
+  });
+  const aviatorOverridesRef = useRef<Record<string, number>>(aviatorOverrides);
+  aviatorOverridesRef.current = aviatorOverrides;
+
   useEffect(() => {
-    const qAviator = query(
-      collection(db, 'aviatorRounds'),
-      orderBy('timestamp', 'desc'),
-      limit(50)
-    );
-
-    const unsubscribeAviator = onSnapshot(qAviator, (snap) => {
-      if (!snap.empty) {
-        const cloudRecords: AviatorRoundRecord[] = [];
-        const mults: number[] = [];
-        snap.forEach((docSnap) => {
-          const d = docSnap.data();
-          const crashM = Number(d.crashPoint || d.crashMultiplier) || 1.5;
-          mults.push(crashM);
-          cloudRecords.push({
-            roundId: String(d.roundId || docSnap.id),
-            crashMultiplier: crashM,
-            flightDurationSec: Number(d.flightDurationSec) || 4.0,
-            hash: d.hash || 'AV_HASH',
-            time: d.time || new Date(d.timestamp || Date.now()).toLocaleTimeString(),
-            timestamp: Number(d.timestamp) || Date.now(),
-            tier: getMultiplierTier(crashM)
-          });
-        });
-
-        if (mults.length > 0) {
-          setAviatorRecentMultipliers(mults.slice(0, 12));
+    try {
+      const unsub = onSnapshot(doc(db, 'system', 'aviatorOverrides'), (snap) => {
+        if (snap.exists()) {
+          setAviatorOverrides(prev => ({ ...prev, ...(snap.data() as any) }));
         }
-
-        setAviatorHistory(prev => {
-          const cloudIds = new Set(cloudRecords.map(r => r.roundId));
-          const localRemaining = prev.filter(r => !cloudIds.has(r.roundId));
-          const merged = [...cloudRecords, ...localRemaining];
-          merged.sort((a, b) => b.timestamp - a.timestamp);
-          return filterLastOneHour(merged).slice(0, 80);
-        });
-      }
-    }, (err) => {
-      console.warn('Aviator cloud rounds listener notice:', err);
-    });
-
-    return () => unsubscribeAviator();
+      });
+      return () => unsub();
+    } catch {}
   }, []);
+
+  const adminSetAviatorOverride = useCallback(async (roundId: string, crashPoint: number) => {
+    if (crashPoint < 1.00) return { success: false, message: 'Crash multiplier must be at least 1.00x' };
+    const cleanCrash = Number(crashPoint.toFixed(2));
+    setAviatorOverrides(prev => {
+      const next = { ...prev, [roundId]: cleanCrash };
+      try { localStorage.setItem('winxbet_aviator_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await setDoc(doc(db, 'system', 'aviatorOverrides'), { [roundId]: cleanCrash }, { merge: true });
+    } catch {}
+    return { success: true, message: `Aviator Flight #${roundId} crash point locked to ${cleanCrash}x!` };
+  }, []);
+
+  const adminClearAviatorOverride = useCallback(async (roundId: string) => {
+    setAviatorOverrides(prev => {
+      const next = { ...prev };
+      delete next[roundId];
+      try { localStorage.setItem('winxbet_aviator_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+    try {
+      await updateDoc(doc(db, 'system', 'aviatorOverrides'), { [roundId]: deleteField() });
+    } catch {}
+    return { success: true, message: `Aviator Flight #${roundId} reset to provably fair deterministic trajectory.` };
+  }, []);
+
+  const aviatorUpcomingResult = useMemo((): AviatorUpcomingResult => {
+    const hasOverride = aviatorOverrides[aviatorCurrentRoundId] !== undefined;
+    const currentRoundIdx = Math.floor(Date.now() / AVIATOR_CYCLE_MS);
+    const detCrash = getDeterministicAviatorCrash(currentRoundIdx);
+    const crash = hasOverride ? aviatorOverrides[aviatorCurrentRoundId] : detCrash;
+    return {
+      roundId: aviatorCurrentRoundId,
+      crashMultiplier: crash,
+      flightDurationSec: getAviatorFlightDurationSec(crash),
+      isOverridden: hasOverride,
+      phase: aviatorPhase,
+      countdownLeft: aviatorCountdownLeft
+    };
+  }, [aviatorCurrentRoundId, aviatorOverrides, aviatorPhase, aviatorCountdownLeft]);
+
+  const getAviatorUpcomingForecast = useCallback((count: number = 6): AviatorUpcomingResult[] => {
+    const list: AviatorUpcomingResult[] = [];
+    const now = Date.now();
+    const currentBaseIdx = Math.floor(now / AVIATOR_CYCLE_MS);
+    for (let i = 0; i < count; i++) {
+      const idx = currentBaseIdx + i;
+      const rId = `AV-${idx}`;
+      const hasOverride = aviatorOverrides[rId] !== undefined;
+      const det = getDeterministicAviatorCrash(idx);
+      const crash = hasOverride ? aviatorOverrides[rId] : det;
+      list.push({
+        roundId: rId,
+        crashMultiplier: crash,
+        flightDurationSec: getAviatorFlightDurationSec(crash),
+        isOverridden: hasOverride,
+        phase: i === 0 ? aviatorPhase : 'countdown',
+        countdownLeft: i === 0 ? aviatorCountdownLeft : (i * (AVIATOR_CYCLE_MS / 1000))
+      });
+    }
+    return list;
+  }, [aviatorOverrides, aviatorPhase, aviatorCountdownLeft]);
 
   // Universal Epoch Flight Synchronizer for Aviator
   const lastRecordedCrashRoundRef = useRef<string>('');
@@ -562,8 +1009,11 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       const roundIndex = Math.floor(now / AVIATOR_CYCLE_MS);
       const roundId = `AV-${roundIndex}`;
       const offsetMs = now % AVIATOR_CYCLE_MS;
-      const crashPoint = getDeterministicAviatorCrash(roundIndex);
-      const flightDurationSec = Number((Math.pow(crashPoint - 1.0, 1 / 1.65) / 0.75).toFixed(1));
+
+      const overrideCrash = aviatorOverridesRef.current[roundId];
+      const deterministicCrash = getDeterministicAviatorCrash(roundIndex);
+      const crashPoint = overrideCrash !== undefined ? overrideCrash : deterministicCrash;
+      const flightDurationSec = getAviatorFlightDurationSec(crashPoint);
       const flightDurationMs = Math.max(1000, flightDurationSec * 1000);
 
       setAviatorCurrentRoundId(roundId);
@@ -622,7 +1072,8 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       else if (offsetMs < COUNTDOWN_DURATION_MS + flightDurationMs) {
         setAviatorPhase('flying');
         const flightElapsedSec = (offsetMs - COUNTDOWN_DURATION_MS) / 1000;
-        const currentMult = Number((1.00 + Math.pow(flightElapsedSec * 0.75, 1.65)).toFixed(2));
+        // Realistic Spribe exponential climb
+        const currentMult = getAviatorMultiplierAtSec(flightElapsedSec);
         const safeMult = Math.min(crashPoint, Math.max(1.00, currentMult));
         setAviatorMultiplier(safeMult);
 
@@ -689,7 +1140,6 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
           setAviatorRecentMultipliers(prev => [crashPoint, ...prev.slice(0, 11)]);
           setAviatorHistory(prev => filterLastOneHour([crashRecord, ...prev.filter(r => r.roundId !== roundId)]));
 
-          // Write to shared Firestore collection
           setDoc(doc(db, 'aviatorRounds', roundId), {
             ...crashRecord,
             status: 'crashed',
@@ -741,7 +1191,6 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       }
       return { success: false, message: res.message };
     } else {
-      // Queue bet for the next takeoff
       setAviatorQueuedNextBet({
         amount,
         autoCashout,
@@ -761,21 +1210,25 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       return null;
     }
 
-    const currentM = aviatorMultiplier;
+    const currentMultiplier = aviatorMultiplier;
     const bettedAmount = aviatorUserBet.netAmount ?? aviatorUserBet.amount;
-    const win = Number((bettedAmount * currentM).toFixed(2));
+    const calculatedWin = Number((bettedAmount * currentMultiplier).toFixed(2));
 
-    await settleBet(aviatorUserBet.betId, true, win, 0);
+    await settleBet(aviatorUserBet.betId, true, calculatedWin, 0);
 
     setAviatorUserBet({
       ...aviatorUserBet,
       cashedOut: true,
-      cashedMultiplier: currentM,
-      winAmount: win
+      cashedMultiplier: currentMultiplier,
+      winAmount: calculatedWin
     });
 
     triggerHaptic('success');
-    return { success: true, winAmount: win, multiplier: currentM };
+    return {
+      success: true,
+      winAmount: calculatedWin,
+      multiplier: currentMultiplier
+    };
   };
 
   const cancelQueuedAviatorBet = () => {
@@ -783,79 +1236,36 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
     triggerHaptic('light');
   };
 
-  // ==========================================
-  // 3. ADMIN LIVE BETS & VOLUME MONITORING
-  // ==========================================
-  useEffect(() => {
-    // Listen to real-time global bets across all users
-    const qGlobalBets = query(
-      collection(db, 'globalBets'),
-      orderBy('timestamp', 'desc'),
-      limit(100)
-    );
-
-    const unsubscribeGlobal = onSnapshot(qGlobalBets, (snap) => {
-      const betsList: GlobalBet[] = [];
-      snap.forEach((d) => {
-        betsList.push({ id: d.id, ...d.data() } as GlobalBet);
-      });
-      setLiveGlobalBets(betsList);
-    }, (err) => {
-      console.warn('Live global bets listener notice:', err);
-    });
-
-    return () => unsubscribeGlobal();
-  }, []);
-
-  // Compute live round bet pool breakdown for the active WinGo period
-  const liveRoundPool: LiveRoundBetPool | null = React.useMemo(() => {
-    const roundBets = liveGlobalBets.filter(b => b.periodId === wingoCurrentPeriod);
-    const selectionTotals: Record<string, number> = {};
-    const selectionCounts: Record<string, number> = {};
-    let totalBetted = 0;
+  // Live round pool
+  const liveRoundPool = useMemo<LiveRoundBetPool | null>(() => {
+    const activePeriod = wingoCurrentPeriod;
+    const roundBets = liveGlobalBets.filter(b => b.periodId === activePeriod);
+    const totalVolume = roundBets.reduce((acc, b) => acc + (b.amount || 0), 0);
+    const volumeBySelection: Record<string, number> = {};
+    const countBySelection: Record<string, number> = {};
 
     roundBets.forEach(b => {
-      const amt = Number(b.amount) || 0;
-      totalBetted += amt;
-      selectionTotals[b.selection] = (selectionTotals[b.selection] || 0) + amt;
-      selectionCounts[b.selection] = (selectionCounts[b.selection] || 0) + 1;
+      volumeBySelection[b.selection] = (volumeBySelection[b.selection] || 0) + (b.amount || 0);
+      countBySelection[b.selection] = (countBySelection[b.selection] || 0) + 1;
     });
 
     return {
-      periodId: wingoCurrentPeriod,
+      periodId: activePeriod,
       gameType: 'wingo',
-      totalBetted,
+      totalBetted: totalVolume,
       betsCount: roundBets.length,
-      selectionTotals,
-      selectionCounts,
+      selectionTotals: volumeBySelection,
+      selectionCounts: countBySelection,
       bets: roundBets
     };
-  }, [liveGlobalBets, wingoCurrentPeriod]);
+  }, [wingoCurrentPeriod, liveGlobalBets]);
 
-  // ==========================================
-  // 4. BACKGROUND 1-HOUR DATA PURGE DAEMON (Runs every 10s)
-  // ==========================================
+  // Maintenance & Retention daemon
   useEffect(() => {
-    const purgeDaemon = setInterval(() => {
-      setEngineUptime(u => u + 10);
-      setLastPurgeTime(new Date().toLocaleTimeString());
-
-      setWingoHistory(prev => {
-        const retained = filterLastOneHour(prev);
-        const purged = prev.length - retained.length;
-        if (purged > 0) setTotalPurgedWingo(c => c + purged);
-        return retained;
-      });
-
-      setAviatorHistory(prev => {
-        const retained = filterLastOneHour(prev);
-        const purged = prev.length - retained.length;
-        if (purged > 0) setTotalPurgedAviator(c => c + purged);
-        return retained;
-      });
-    }, 10000);
-
-    return () => clearInterval(purgeDaemon);
+    const uptimeTimer = setInterval(() => {
+      setEngineUptime(s => s + 1);
+    }, 1000);
+    return () => clearInterval(uptimeTimer);
   }, []);
 
   return (
@@ -888,6 +1298,48 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
         placeAviatorBet,
         cashoutAviatorBet,
         cancelQueuedAviatorBet,
+        aviatorOverrides,
+        adminSetAviatorOverride,
+        adminClearAviatorOverride,
+        getAviatorUpcomingForecast,
+        aviatorUpcomingResult,
+
+        k3TimeLeft,
+        k3CurrentPeriod,
+        k3IsLocked,
+        k3History,
+        k3RevealedResult,
+        k3IsRevealing,
+        k3UpcomingResult,
+        k3Overrides,
+        adminSetK3Override,
+        adminClearK3Override,
+        getK3UpcomingForecast,
+        placeK3Bet,
+
+        trxTimeLeft,
+        trxCurrentPeriod,
+        trxIsLocked,
+        trxHistory,
+        trxRevealedResult,
+        trxIsRevealing,
+        trxUpcomingResult,
+        trxOverrides,
+        adminSetTrxOverride,
+        adminClearTrxOverride,
+        getTrxUpcomingForecast,
+        placeTrxBet,
+
+        dtTimeLeft,
+        dtCurrentRoundId,
+        dtHistory,
+        dtRevealedResult,
+        dtUpcomingResult,
+        dtOverrides,
+        adminSetDtOverride,
+        adminClearDtOverride,
+        getDtUpcomingForecast,
+        placeDtBet,
 
         liveRoundPool,
         liveGlobalBets,

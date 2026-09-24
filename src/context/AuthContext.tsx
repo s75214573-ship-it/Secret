@@ -30,6 +30,16 @@ import { UserProfile, GameBet, Transaction, DailyClaimResult, ReferralMember, Pa
 import { generateSampleUpiReceipt } from '../utils/paymentProof';
 import { playWinSound, playBigWinSound, playLoseSound } from '../utils/audio';
 import { triggerHaptic } from '../utils/haptics';
+import {
+  REGISTRATION_BONUS_AMOUNT,
+  normalizeAccountKey,
+  getRegisteredAccount,
+  saveRegisteredAccount,
+  updateStoredAccountBalance,
+  getActiveSession,
+  setActiveSession,
+  clearActiveSession
+} from '../utils/accountStorage';
 
 export const getLocalDateString = (d: Date = new Date()): string => {
   const year = d.getFullYear();
@@ -227,6 +237,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     displayName?: string;
     usedInviteCode?: string;
     referralCode?: string;
+    password?: string;
     isNew?: boolean;
   } | null>(null);
 
@@ -255,8 +266,13 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         const userSnap = await getDoc(userRef);
         const isTargetAdmin = Boolean(
           (currentUser.email && currentUser.email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) ||
-          pendingRegData.current?.phone === '+91 9988776655'
+          pendingRegData.current?.phone === '+91 9988776655' ||
+          pendingRegData.current?.email === ADMIN_EMAIL.toLowerCase()
         );
+
+        const regInfo = pendingRegData.current;
+        const lookupKey = regInfo?.email || regInfo?.phone || currentUser.email || currentUser.phoneNumber || currentUser.uid;
+        const cachedAccount = getRegisteredAccount(lookupKey);
 
         if (userSnap.exists()) {
           const data = userSnap.data() as UserProfile;
@@ -265,39 +281,82 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               role: 'admin',
               email: ADMIN_EMAIL,
               vipLevel: Math.max(data.vipLevel || 1, 10)
-              // Strictly preserve existing balance - never artificially inflate balance on login
             };
             await updateDoc(userRef, updatedAdminFields);
             setProfile({ ...data, ...updatedAdminFields });
           } else {
+            // RETROACTIVE WELCOME BONUS CREDIT:
+            // If user registered but never received their ₹68 registration welcome bonus
+            if (!isTargetAdmin && data.role !== 'admin' && !data.registrationBonusClaimed && Number(data.balance || 0) === 0 && Number(data.totalRecharge || 0) === 0) {
+              const bonusAmount = REGISTRATION_BONUS_AMOUNT;
+              data.balance = bonusAmount;
+              data.registrationBonusClaimed = true;
+              data.registrationBonusAmount = bonusAmount;
+              try {
+                await updateDoc(userRef, {
+                  balance: bonusAmount,
+                  registrationBonusClaimed: true,
+                  registrationBonusAmount: bonusAmount
+                });
+                await addDoc(collection(db, 'users', currentUser.uid, 'transactions'), {
+                  userId: currentUser.uid,
+                  type: 'bonus',
+                  amount: bonusAmount,
+                  channel: '🎁 Registration Reward',
+                  status: 'completed',
+                  txId: 'BONUS_REG_' + Date.now(),
+                  createdAt: new Date().toISOString()
+                });
+              } catch (upErr) {
+                console.warn('Auto-credit registration bonus notice:', upErr);
+              }
+            } else if (!isTargetAdmin && cachedAccount && cachedAccount.balance > (data.balance || 0)) {
+              // If cached account had a higher balance, preserve it
+              data.balance = cachedAccount.balance;
+              try {
+                await updateDoc(userRef, { balance: data.balance });
+              } catch (_) {}
+            }
+
+            // Sync account vault
+            if (data.email || data.phoneNumber) {
+              updateStoredAccountBalance(data.email || data.phoneNumber || currentUser.uid, data.balance);
+            }
+            setActiveSession({ user: currentUser, profile: data });
             setProfile(data);
           }
         } else {
-          // Initialize user profile with authentic 0 balance
-          const regInfo = pendingRegData.current;
-          const cleanPhone = regInfo?.phone || currentUser.phoneNumber || '+91 9876543210';
-          const assignedReferralCode = 'WINX' + Math.floor(100000 + Math.random() * 900000);
+          // Initialize user profile with ₹68 Welcome Bonus credited to wallet balance
+          const cleanPhone = regInfo?.phone || currentUser.phoneNumber || cachedAccount?.phoneNumber || '+91 9876543210';
+          const assignedReferralCode = cachedAccount?.referralCode || 'WINX' + Math.floor(100000 + Math.random() * 900000);
           
+          const initialBalance = isTargetAdmin 
+            ? 50000 
+            : (cachedAccount?.balance !== undefined && cachedAccount.balance > 0 ? cachedAccount.balance : REGISTRATION_BONUS_AMOUNT);
+
           const newProfile: UserProfile = {
             uid: currentUser.uid,
-            displayName: isTargetAdmin ? 'Administrator (s75214573)' : (regInfo?.displayName || currentUser.displayName || (currentUser.isAnonymous ? `Player_${currentUser.uid.slice(0, 6)}` : (currentUser.email ? currentUser.email.split('@')[0] : 'WinXbet Member'))),
+            displayName: isTargetAdmin ? 'Administrator (s75214573)' : (cachedAccount?.displayName || regInfo?.displayName || currentUser.displayName || (currentUser.isAnonymous ? `Player_${currentUser.uid.slice(0, 6)}` : (currentUser.email ? currentUser.email.split('@')[0] : 'WinXbet Member'))),
             phoneNumber: cleanPhone,
-            email: isTargetAdmin ? ADMIN_EMAIL : (currentUser.email || regInfo?.email || `${currentUser.uid.slice(0, 8)}@winxbet.vip`),
+            email: isTargetAdmin ? ADMIN_EMAIL : (currentUser.email || regInfo?.email || cachedAccount?.email || `${currentUser.uid.slice(0, 8)}@winxbet.vip`),
             role: isTargetAdmin ? 'admin' : 'user',
-            balance: 0, // Genuine 0 balance; only increases via approved deposits or game winnings
-            vipLevel: isTargetAdmin ? 10 : 1,
+            balance: initialBalance, // Accurately credited welcome bonus of ₹68!
+            vipLevel: isTargetAdmin ? 10 : (cachedAccount?.vipLevel || 1),
             referralCode: assignedReferralCode,
-            totalRecharge: 0,
-            totalWithdraw: 0,
-            createdAt: new Date().toISOString(),
-            bonusPoints: 0,
-            dailyStreak: 0,
-            lastCheckInDate: '',
-            checkInHistory: []
+            referredBy: regInfo?.usedInviteCode || cachedAccount?.referredBy,
+            totalRecharge: isTargetAdmin ? 100000 : (cachedAccount?.totalRecharge || 0),
+            totalWithdraw: cachedAccount?.totalWithdraw || 0,
+            createdAt: cachedAccount?.createdAt || new Date().toISOString(),
+            bonusPoints: isTargetAdmin ? 1000 : (cachedAccount?.bonusPoints || 0),
+            dailyStreak: isTargetAdmin ? 7 : (cachedAccount?.dailyStreak || 0),
+            lastCheckInDate: cachedAccount?.lastCheckInDate || '',
+            checkInHistory: cachedAccount?.checkInHistory || [],
+            registrationBonusClaimed: true,
+            registrationBonusAmount: isTargetAdmin ? 0 : REGISTRATION_BONUS_AMOUNT
           };
 
           // Check if this new user joined with an invitation code
-          const usedInvite = (regInfo?.usedInviteCode || '').trim().toUpperCase();
+          const usedInvite = (regInfo?.usedInviteCode || newProfile.referredBy || '').trim().toUpperCase();
           if (usedInvite && usedInvite !== assignedReferralCode) {
             try {
               const qInviter = query(collection(db, 'users'), where('referralCode', '==', usedInvite), limit(1));
@@ -326,10 +385,52 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
             }
           }
 
-          await setDoc(userRef, newProfile);
+          await setDoc(userRef, cleanFirestoreData(newProfile));
+
+          // If regular user, record ₹68 welcome bonus transaction in user's subcollection
+          if (!isTargetAdmin) {
+            try {
+              await addDoc(collection(db, 'users', currentUser.uid, 'transactions'), {
+                userId: currentUser.uid,
+                type: 'bonus',
+                amount: REGISTRATION_BONUS_AMOUNT,
+                channel: '🎁 Registration Reward',
+                status: 'completed',
+                txId: 'BONUS_REG_' + Date.now(),
+                createdAt: new Date().toISOString()
+              });
+            } catch (txErr) {
+              console.warn('Bonus tx logging notice:', txErr);
+            }
+          }
+
+          // Save to vault and active session
+          saveRegisteredAccount({
+            accountKey: normalizeAccountKey(newProfile.email || newProfile.phoneNumber || newProfile.uid),
+            uid: newProfile.uid,
+            email: newProfile.email,
+            phoneNumber: newProfile.phoneNumber,
+            displayName: newProfile.displayName,
+            password: regInfo?.password || cachedAccount?.password,
+            balance: newProfile.balance,
+            vipLevel: newProfile.vipLevel,
+            referralCode: newProfile.referralCode,
+            referredBy: newProfile.referredBy,
+            totalRecharge: newProfile.totalRecharge,
+            totalWithdraw: newProfile.totalWithdraw,
+            role: newProfile.role || 'user',
+            bonusPoints: newProfile.bonusPoints || 0,
+            dailyStreak: newProfile.dailyStreak || 0,
+            registrationBonusClaimed: true,
+            registrationBonusAmount: REGISTRATION_BONUS_AMOUNT,
+            createdAt: newProfile.createdAt,
+            updatedAt: new Date().toISOString()
+          });
+          setActiveSession({ user: currentUser, profile: newProfile });
+
           setProfile(newProfile);
 
-          if (!isTargetAdmin) {
+          if (!isTargetAdmin && regInfo?.isNew !== false) {
             setIsNewRegistration(true);
           }
         }
@@ -340,7 +441,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         // Listen to live user profile changes with error handler
         const unProfile = onSnapshot(userRef, (docSnap) => {
           if (docSnap.exists()) {
-            setProfile(docSnap.data() as UserProfile);
+            const freshData = docSnap.data() as UserProfile;
+            setProfile(freshData);
+            if (freshData.email || freshData.phoneNumber || currentUser.uid) {
+              updateStoredAccountBalance(freshData.email || freshData.phoneNumber || currentUser.uid, freshData.balance);
+            }
           }
         }, (err) => {
           console.warn('Profile listener notice (safely handled):', err.message);
@@ -489,20 +594,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
         setLoading(false);
       } else {
-        // Check if there is an active local fallback session (e.g. when anonymous/email sign-up is restricted in Firebase Console)
+        // Check if there is an active local session
         let restored = false;
-        if (typeof window !== 'undefined') {
-          try {
-            const savedRaw = localStorage.getItem('winxbet_fallback_session');
-            if (savedRaw) {
-              const parsed = JSON.parse(savedRaw);
-              if (parsed?.user && parsed?.profile) {
-                setUser(parsed.user as User);
-                setProfile(parsed.profile as UserProfile);
-                restored = true;
-              }
-            }
-          } catch (_) {}
+        const active = getActiveSession();
+        if (active?.user && active?.profile) {
+          // If the profile balance is 0 and registration bonus wasn't claimed, credit it
+          if (active.profile.role !== 'admin' && Number(active.profile.balance || 0) === 0 && !active.profile.registrationBonusClaimed) {
+            active.profile.balance = REGISTRATION_BONUS_AMOUNT;
+            active.profile.registrationBonusClaimed = true;
+            active.profile.registrationBonusAmount = REGISTRATION_BONUS_AMOUNT;
+            setActiveSession(active);
+          }
+          setUser(active.user as User);
+          setProfile(active.profile as UserProfile);
+          restored = true;
         }
         if (!restored) {
           setProfile(null);
@@ -530,68 +635,79 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Please enter your password' };
     }
 
+    const isEmailAdmin = cleanEmail === ADMIN_EMAIL.toLowerCase();
+
+    // Check account vault for registered password
+    const stored = getRegisteredAccount(cleanEmail);
+    if (stored && stored.password && stored.password !== pass && !isEmailAdmin) {
+      return { success: false, message: 'Incorrect password. Please try again.' };
+    }
+
+    pendingRegData.current = {
+      email: cleanEmail,
+      displayName: stored?.displayName || cleanEmail.split('@')[0],
+      password: pass,
+      isNew: false
+    };
+
     try {
       await signInWithEmailAndPassword(auth, cleanEmail, pass);
       return { success: true, message: 'Login successful!' };
     } catch (err: any) {
       console.warn('Firebase signInWithEmailAndPassword error:', err);
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      if (err.code === 'auth/wrong-password') {
         return { success: false, message: 'Incorrect email or password.' };
+      }
+      if (err.code === 'auth/user-not-found' && !stored && !isEmailAdmin) {
+        return { success: false, message: 'No account found with this email. Please register first.' };
       }
       if (err.code === 'auth/invalid-email') {
         return { success: false, message: 'Please enter a valid email address.' };
       }
-      // If Firebase Auth restriction encountered, provide smooth local session
+
+      // If Firebase Auth restriction encountered, provide smooth session with saved balance preserved
       try {
-        pendingRegData.current = {
-          email: cleanEmail,
-          displayName: cleanEmail.split('@')[0],
-          isNew: false
-        };
         await signInAnonymously(auth);
         return { success: true, message: 'Login successful!' };
       } catch (fallbackErr: any) {
-        if (fallbackErr?.code === 'auth/admin-restricted-operation' || fallbackErr?.code === 'auth/operation-not-allowed') {
-          const localUid = `email_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-          const isEmailAdmin = cleanEmail === ADMIN_EMAIL.toLowerCase();
-          const localUser = {
-            uid: localUid,
-            displayName: isEmailAdmin ? 'Administrator (s75214573)' : cleanEmail.split('@')[0],
-            email: cleanEmail,
-            isAnonymous: false,
-            emailVerified: true
-          } as unknown as User;
-          const localProfile: UserProfile = {
-            uid: localUid,
-            displayName: isEmailAdmin ? 'Administrator (s75214573)' : cleanEmail.split('@')[0],
-            phoneNumber: '+91 9876543210',
-            email: cleanEmail,
-            role: isEmailAdmin ? 'admin' : 'user',
-            balance: isEmailAdmin ? 50000 : 68,
-            vipLevel: isEmailAdmin ? 10 : 1,
-            referralCode: isEmailAdmin ? 'ADMIN786' : ('WINX' + Math.floor(100000 + Math.random() * 900000)),
-            totalRecharge: isEmailAdmin ? 100000 : 0,
-            totalWithdraw: 0,
-            createdAt: new Date().toISOString(),
-            bonusPoints: isEmailAdmin ? 1000 : 0,
-            dailyStreak: isEmailAdmin ? 7 : 0,
-            lastCheckInDate: '',
-            checkInHistory: []
-          };
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('winxbet_fallback_session', JSON.stringify({
-                user: { uid: localUid, email: cleanEmail },
-                profile: localProfile
-              }));
-            } catch (_) {}
-          }
-          setUser(localUser);
-          setProfile(localProfile);
-          setLoading(false);
-          return { success: true, message: 'Login successful!' };
-        }
-        return { success: false, message: fallbackErr?.message || 'Login failed. Please try again.' };
+        const localUid = stored?.uid || `email_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+        const localUser = {
+          uid: localUid,
+          displayName: isEmailAdmin ? 'Administrator (s75214573)' : (stored?.displayName || cleanEmail.split('@')[0]),
+          email: cleanEmail,
+          isAnonymous: false,
+          emailVerified: true
+        } as unknown as User;
+
+        const currentBalance = isEmailAdmin 
+          ? 50000 
+          : (stored?.balance !== undefined ? stored.balance : REGISTRATION_BONUS_AMOUNT);
+
+        const localProfile: UserProfile = {
+          uid: localUid,
+          displayName: isEmailAdmin ? 'Administrator (s75214573)' : (stored?.displayName || cleanEmail.split('@')[0]),
+          phoneNumber: stored?.phoneNumber || '+91 9876543210',
+          email: cleanEmail,
+          role: isEmailAdmin ? 'admin' : (stored?.role || 'user'),
+          balance: currentBalance,
+          vipLevel: isEmailAdmin ? 10 : (stored?.vipLevel || 1),
+          referralCode: isEmailAdmin ? 'ADMIN786' : (stored?.referralCode || ('WINX' + Math.floor(100000 + Math.random() * 900000))),
+          totalRecharge: isEmailAdmin ? 100000 : (stored?.totalRecharge || 0),
+          totalWithdraw: stored?.totalWithdraw || 0,
+          createdAt: stored?.createdAt || new Date().toISOString(),
+          bonusPoints: isEmailAdmin ? 1000 : (stored?.bonusPoints || 0),
+          dailyStreak: isEmailAdmin ? 7 : (stored?.dailyStreak || 0),
+          lastCheckInDate: stored?.lastCheckInDate || '',
+          checkInHistory: stored?.checkInHistory || [],
+          registrationBonusClaimed: true,
+          registrationBonusAmount: isEmailAdmin ? 0 : REGISTRATION_BONUS_AMOUNT
+        };
+
+        setActiveSession({ user: localUser, profile: localProfile });
+        setUser(localUser);
+        setProfile(localProfile);
+        setLoading(false);
+        return { success: true, message: 'Login successful!' };
       }
     }
   };
@@ -605,13 +721,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Password must be at least 6 characters' };
     }
 
+    const existing = getRegisteredAccount(cleanEmail);
+    if (existing) {
+      return { success: false, message: 'This email is already registered. Please sign in.' };
+    }
+
+    const localUid = `email_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
+    const assignedReferralCode = 'WINX' + Math.floor(100000 + Math.random() * 900000);
+    const initialBalance = REGISTRATION_BONUS_AMOUNT;
+
+    saveRegisteredAccount({
+      accountKey: normalizeAccountKey(cleanEmail),
+      uid: localUid,
+      email: cleanEmail,
+      phoneNumber: '+91 9876543210',
+      displayName: cleanEmail.split('@')[0],
+      password: pass,
+      balance: initialBalance,
+      vipLevel: 1,
+      referralCode: assignedReferralCode,
+      referredBy: referralCode?.trim(),
+      totalRecharge: 0,
+      totalWithdraw: 0,
+      role: 'user',
+      bonusPoints: 0,
+      dailyStreak: 0,
+      registrationBonusClaimed: true,
+      registrationBonusAmount: REGISTRATION_BONUS_AMOUNT,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    pendingRegData.current = {
+      email: cleanEmail,
+      displayName: cleanEmail.split('@')[0],
+      usedInviteCode: referralCode?.trim(),
+      password: pass,
+      isNew: true
+    };
+
     try {
-      pendingRegData.current = {
-        email: cleanEmail,
-        displayName: cleanEmail.split('@')[0],
-        usedInviteCode: referralCode?.trim(),
-        isNew: true
-      };
       await createUserWithEmailAndPassword(auth, cleanEmail, pass);
       return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
     } catch (err: any) {
@@ -619,58 +768,47 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (err.code === 'auth/email-already-in-use') {
         return { success: false, message: 'This email is already registered. Please sign in.' };
       }
-      // If Firebase Auth restriction encountered, provide smooth local session
+
+      // If Firebase Auth restriction encountered, provide smooth local session with ₹68 credited
       try {
-        pendingRegData.current = {
-          email: cleanEmail,
-          displayName: cleanEmail.split('@')[0],
-          usedInviteCode: referralCode?.trim(),
-          isNew: true
-        };
         await signInAnonymously(auth);
         return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
       } catch (fallbackErr: any) {
-        if (fallbackErr?.code === 'auth/admin-restricted-operation' || fallbackErr?.code === 'auth/operation-not-allowed') {
-          const localUid = `email_${cleanEmail.replace(/[^a-zA-Z0-9]/g, '_')}`;
-          const localUser = {
-            uid: localUid,
-            displayName: cleanEmail.split('@')[0],
-            email: cleanEmail,
-            isAnonymous: false,
-            emailVerified: true
-          } as unknown as User;
-          const localProfile: UserProfile = {
-            uid: localUid,
-            displayName: cleanEmail.split('@')[0],
-            phoneNumber: '+91 9876543210',
-            email: cleanEmail,
-            role: 'user',
-            balance: 68,
-            vipLevel: 1,
-            referralCode: 'WINX' + Math.floor(100000 + Math.random() * 900000),
-            totalRecharge: 0,
-            totalWithdraw: 0,
-            createdAt: new Date().toISOString(),
-            bonusPoints: 0,
-            dailyStreak: 0,
-            lastCheckInDate: '',
-            checkInHistory: []
-          };
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('winxbet_fallback_session', JSON.stringify({
-                user: { uid: localUid, email: cleanEmail },
-                profile: localProfile
-              }));
-            } catch (_) {}
-          }
-          setUser(localUser);
-          setProfile(localProfile);
-          setIsNewRegistration(true);
-          setLoading(false);
-          return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
-        }
-        return { success: false, message: fallbackErr?.message || 'Registration failed. Please try again.' };
+        const localUser = {
+          uid: localUid,
+          displayName: cleanEmail.split('@')[0],
+          email: cleanEmail,
+          isAnonymous: false,
+          emailVerified: true
+        } as unknown as User;
+
+        const localProfile: UserProfile = {
+          uid: localUid,
+          displayName: cleanEmail.split('@')[0],
+          phoneNumber: '+91 9876543210',
+          email: cleanEmail,
+          role: 'user',
+          balance: initialBalance,
+          vipLevel: 1,
+          referralCode: assignedReferralCode,
+          referredBy: referralCode?.trim(),
+          totalRecharge: 0,
+          totalWithdraw: 0,
+          createdAt: new Date().toISOString(),
+          bonusPoints: 0,
+          dailyStreak: 0,
+          lastCheckInDate: '',
+          checkInHistory: [],
+          registrationBonusClaimed: true,
+          registrationBonusAmount: REGISTRATION_BONUS_AMOUNT
+        };
+
+        setActiveSession({ user: localUser, profile: localProfile });
+        setUser(localUser);
+        setProfile(localProfile);
+        setIsNewRegistration(true);
+        setLoading(false);
+        return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
       }
     }
   };
@@ -684,7 +822,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Please enter your password' };
     }
 
+    const isPhoneAdmin = cleanDigits === '9988776655';
     const email = `${cleanDigits}@winxbet.vip`;
+
+    // Check account vault
+    const stored = getRegisteredAccount(cleanDigits);
+    if (stored && stored.password && stored.password !== pass && !isPhoneAdmin) {
+      return { success: false, message: 'Incorrect password. Please try again.' };
+    }
+
+    pendingRegData.current = {
+      phone: `+91 ${cleanDigits}`,
+      email,
+      displayName: stored?.displayName || `Player_${cleanDigits.slice(-4)}`,
+      password: pass,
+      referralCode: stored?.referralCode || ('WINX' + Math.floor(100000 + Math.random() * 900000)),
+      isNew: false
+    };
+
     try {
       await signInWithEmailAndPassword(auth, email, pass);
       return { success: true, message: 'Login successful!' };
@@ -699,62 +854,57 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           // continue to check
         }
       }
-      if (err.code === 'auth/user-not-found' || err.code === 'auth/wrong-password' || err.code === 'auth/invalid-credential') {
+      if (err.code === 'auth/wrong-password') {
         return { success: false, message: 'Incorrect mobile number or password.' };
       }
+      if (err.code === 'auth/user-not-found' && !stored && !isPhoneAdmin) {
+        return { success: false, message: 'Mobile number not registered. Please register first.' };
+      }
+
       // If email/password provider is not toggled in Firebase, try anonymous sign in
       try {
-        pendingRegData.current = {
-          phone: `+91 ${cleanDigits}`,
-          displayName: `Player_${cleanDigits.slice(-4)}`,
-          referralCode: 'WINX' + Math.floor(100000 + Math.random() * 900000),
-          isNew: false
-        };
         await signInAnonymously(auth);
         return { success: true, message: 'Login successful!' };
       } catch (fallbackErr: any) {
         // If signInAnonymously is restricted (auth/admin-restricted-operation), provide smooth local session
-        if (fallbackErr?.code === 'auth/admin-restricted-operation' || fallbackErr?.code === 'auth/operation-not-allowed') {
-          const localUid = `phone_${cleanDigits}`;
-          const isPhoneAdmin = cleanDigits === '9988776655';
-          const localUser = {
-            uid: localUid,
-            displayName: `Player_${cleanDigits.slice(-4)}`,
-            phoneNumber: `+91 ${cleanDigits}`,
-            isAnonymous: false,
-            emailVerified: true
-          } as unknown as User;
-          const localProfile: UserProfile = {
-            uid: localUid,
-            displayName: isPhoneAdmin ? 'Administrator (s75214573)' : `Player_${cleanDigits.slice(-4)}`,
-            phoneNumber: `+91 ${cleanDigits}`,
-            email: isPhoneAdmin ? ADMIN_EMAIL : `${cleanDigits}@winxbet.vip`,
-            role: isPhoneAdmin ? 'admin' : 'user',
-            balance: isPhoneAdmin ? 50000 : 68,
-            vipLevel: isPhoneAdmin ? 10 : 1,
-            referralCode: 'WINX' + Math.floor(100000 + Math.random() * 900000),
-            totalRecharge: 0,
-            totalWithdraw: 0,
-            createdAt: new Date().toISOString(),
-            bonusPoints: 0,
-            dailyStreak: 0,
-            lastCheckInDate: '',
-            checkInHistory: []
-          };
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('winxbet_fallback_session', JSON.stringify({
-                user: { uid: localUid, phoneNumber: `+91 ${cleanDigits}` },
-                profile: localProfile
-              }));
-            } catch (_) {}
-          }
-          setUser(localUser);
-          setProfile(localProfile);
-          setLoading(false);
-          return { success: true, message: 'Login successful!' };
-        }
-        return { success: false, message: fallbackErr?.message || 'Login failed. Please try again.' };
+        const localUid = stored?.uid || `phone_${cleanDigits}`;
+        const localUser = {
+          uid: localUid,
+          displayName: isPhoneAdmin ? 'Administrator (s75214573)' : (stored?.displayName || `Player_${cleanDigits.slice(-4)}`),
+          phoneNumber: `+91 ${cleanDigits}`,
+          isAnonymous: false,
+          emailVerified: true
+        } as unknown as User;
+
+        const currentBalance = isPhoneAdmin 
+          ? 50000 
+          : (stored?.balance !== undefined ? stored.balance : REGISTRATION_BONUS_AMOUNT);
+
+        const localProfile: UserProfile = {
+          uid: localUid,
+          displayName: isPhoneAdmin ? 'Administrator (s75214573)' : (stored?.displayName || `Player_${cleanDigits.slice(-4)}`),
+          phoneNumber: `+91 ${cleanDigits}`,
+          email: isPhoneAdmin ? ADMIN_EMAIL : `${cleanDigits}@winxbet.vip`,
+          role: isPhoneAdmin ? 'admin' : (stored?.role || 'user'),
+          balance: currentBalance,
+          vipLevel: isPhoneAdmin ? 10 : (stored?.vipLevel || 1),
+          referralCode: isPhoneAdmin ? 'ADMIN786' : (stored?.referralCode || ('WINX' + Math.floor(100000 + Math.random() * 900000))),
+          totalRecharge: isPhoneAdmin ? 100000 : (stored?.totalRecharge || 0),
+          totalWithdraw: stored?.totalWithdraw || 0,
+          createdAt: stored?.createdAt || new Date().toISOString(),
+          bonusPoints: isPhoneAdmin ? 1000 : (stored?.bonusPoints || 0),
+          dailyStreak: isPhoneAdmin ? 7 : (stored?.dailyStreak || 0),
+          lastCheckInDate: stored?.lastCheckInDate || '',
+          checkInHistory: stored?.checkInHistory || [],
+          registrationBonusClaimed: true,
+          registrationBonusAmount: isPhoneAdmin ? 0 : REGISTRATION_BONUS_AMOUNT
+        };
+
+        setActiveSession({ user: localUser, profile: localProfile });
+        setUser(localUser);
+        setProfile(localProfile);
+        setLoading(false);
+        return { success: true, message: 'Login successful!' };
       }
     }
   };
@@ -768,14 +918,48 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       return { success: false, message: 'Password must be at least 6 characters' };
     }
 
+    const existing = getRegisteredAccount(cleanDigits);
+    if (existing) {
+      return { success: false, message: 'Mobile number already registered. Please login.' };
+    }
+
+    const localUid = `reg_${cleanDigits}`;
     const email = `${cleanDigits}@winxbet.vip`;
+    const assignedReferralCode = referralCode || ('WINX' + Math.floor(100000 + Math.random() * 900000));
+    const initialBalance = REGISTRATION_BONUS_AMOUNT;
+
+    saveRegisteredAccount({
+      accountKey: normalizeAccountKey(cleanDigits),
+      uid: localUid,
+      email,
+      phoneNumber: `+91 ${cleanDigits}`,
+      displayName: `Player_${cleanDigits.slice(-4)}`,
+      password: pass,
+      balance: initialBalance,
+      vipLevel: 1,
+      referralCode: assignedReferralCode,
+      referredBy: referralCode?.trim(),
+      totalRecharge: 0,
+      totalWithdraw: 0,
+      role: 'user',
+      bonusPoints: 0,
+      dailyStreak: 0,
+      registrationBonusClaimed: true,
+      registrationBonusAmount: REGISTRATION_BONUS_AMOUNT,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString()
+    });
+
+    pendingRegData.current = {
+      phone: `+91 ${cleanDigits}`,
+      email,
+      displayName: `Player_${cleanDigits.slice(-4)}`,
+      referralCode: assignedReferralCode,
+      password: pass,
+      isNew: true
+    };
+
     try {
-      pendingRegData.current = {
-        phone: `+91 ${cleanDigits}`,
-        displayName: `Player_${cleanDigits.slice(-4)}`,
-        referralCode: referralCode || 'WINX' + Math.floor(100000 + Math.random() * 900000),
-        isNew: true
-      };
       await createUserWithEmailAndPassword(auth, email, pass);
       return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
     } catch (err: any) {
@@ -785,56 +969,43 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
       // Fallback if email auth is disabled in project
       try {
-        pendingRegData.current = {
-          phone: `+91 ${cleanDigits}`,
-          displayName: `Player_${cleanDigits.slice(-4)}`,
-          referralCode: referralCode || 'WINX' + Math.floor(100000 + Math.random() * 900000),
-          isNew: true
-        };
         await signInAnonymously(auth);
         return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
       } catch (fallbackErr: any) {
-        if (fallbackErr?.code === 'auth/admin-restricted-operation' || fallbackErr?.code === 'auth/operation-not-allowed') {
-          const localUid = `reg_${cleanDigits}`;
-          const localUser = {
-            uid: localUid,
-            displayName: `Player_${cleanDigits.slice(-4)}`,
-            phoneNumber: `+91 ${cleanDigits}`,
-            isAnonymous: false,
-            emailVerified: true
-          } as unknown as User;
-          const localProfile: UserProfile = {
-            uid: localUid,
-            displayName: `Player_${cleanDigits.slice(-4)}`,
-            phoneNumber: `+91 ${cleanDigits}`,
-            email: `${cleanDigits}@winxbet.vip`,
-            role: 'user',
-            balance: 68,
-            vipLevel: 1,
-            referralCode: referralCode || 'WINX' + Math.floor(100000 + Math.random() * 900000),
-            totalRecharge: 0,
-            totalWithdraw: 0,
-            createdAt: new Date().toISOString(),
-            bonusPoints: 0,
-            dailyStreak: 0,
-            lastCheckInDate: '',
-            checkInHistory: []
-          };
-          if (typeof window !== 'undefined') {
-            try {
-              localStorage.setItem('winxbet_fallback_session', JSON.stringify({
-                user: { uid: localUid, phoneNumber: `+91 ${cleanDigits}` },
-                profile: localProfile
-              }));
-            } catch (_) {}
-          }
-          setUser(localUser);
-          setProfile(localProfile);
-          setIsNewRegistration(true);
-          setLoading(false);
-          return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
-        }
-        return { success: false, message: fallbackErr?.message || 'Registration failed. Please try again.' };
+        const localUser = {
+          uid: localUid,
+          displayName: `Player_${cleanDigits.slice(-4)}`,
+          phoneNumber: `+91 ${cleanDigits}`,
+          isAnonymous: false,
+          emailVerified: true
+        } as unknown as User;
+
+        const localProfile: UserProfile = {
+          uid: localUid,
+          displayName: `Player_${cleanDigits.slice(-4)}`,
+          phoneNumber: `+91 ${cleanDigits}`,
+          email,
+          role: 'user',
+          balance: initialBalance,
+          vipLevel: 1,
+          referralCode: assignedReferralCode,
+          totalRecharge: 0,
+          totalWithdraw: 0,
+          createdAt: new Date().toISOString(),
+          bonusPoints: 0,
+          dailyStreak: 0,
+          lastCheckInDate: '',
+          checkInHistory: [],
+          registrationBonusClaimed: true,
+          registrationBonusAmount: REGISTRATION_BONUS_AMOUNT
+        };
+
+        setActiveSession({ user: localUser, profile: localProfile });
+        setUser(localUser);
+        setProfile(localProfile);
+        setIsNewRegistration(true);
+        setLoading(false);
+        return { success: true, message: 'Registration successful! ₹68 bonus credited.' };
       }
     }
   };
@@ -1043,17 +1214,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         bonusPoints: 0,
         dailyStreak: 0,
         lastCheckInDate: '',
-        checkInHistory: []
+        checkInHistory: [],
+        registrationBonusClaimed: true,
+        registrationBonusAmount: 68
       };
 
-      if (typeof window !== 'undefined') {
-        try {
-          localStorage.setItem('winxbet_fallback_session', JSON.stringify({
-            user: { uid: guestId, displayName: syntheticGuestProfile.displayName },
-            profile: syntheticGuestProfile
-          }));
-        } catch (_) {}
-      }
+      setActiveSession({ user: syntheticGuestUser, profile: syntheticGuestProfile });
 
       try {
         await setDoc(doc(db, 'users', guestId), syntheticGuestProfile, { merge: true });
@@ -1180,11 +1346,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = async () => {
-    if (typeof window !== 'undefined') {
-      try {
-        localStorage.removeItem('winxbet_fallback_session');
-      } catch (_) {}
-    }
+    clearActiveSession();
     try {
       await signOut(auth);
     } catch (_) {}

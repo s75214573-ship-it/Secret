@@ -22,6 +22,8 @@ export interface UserProfile {
   status?: 'active' | 'frozen' | 'restricted';
   adminNotes?: string;
   customPin?: string;
+  registrationBonusClaimed?: boolean;
+  registrationBonusAmount?: number;
 }
 
 export interface RealLiquidityStats {
@@ -65,9 +67,9 @@ export interface DailyClaimResult {
 export interface GameBet {
   id?: string;
   userId: string;
-  gameType: 'wingo-1m' | 'wingo-3m' | 'wingo-5m' | 'k3' | 'trx' | 'aviator';
+  gameType: 'wingo-1m' | 'wingo-3m' | 'wingo-5m' | 'wingo' | 'k3' | 'trx' | 'aviator' | 'mines' | 'slots' | 'dragontiger';
   periodId: string;
-  selection: string; // 'Green' | 'Violet' | 'Red' | 'Big' | 'Small' | '0'..'9'
+  selection: string; // 'Green' | 'Violet' | 'Red' | 'Big' | 'Small' | '0'..'9' | dice sum | mine tiles | slot line
   amount: number;
   multiplier: number;
   netAmount?: number; // Net amount betted after mandatory 3% fee deduction
@@ -190,13 +192,15 @@ export interface LiveRoundBetPool {
 
 export type GameCategoryId = 'lottery' | 'original' | 'slots' | 'casino' | 'sports' | 'pvc';
 
+export type GameRoute = 'wingo' | 'aviator' | 'k3' | 'trx' | 'slots' | 'mines' | 'dragontiger';
+
 export interface GameCategoryItem {
   name: string;
   multiplier: string;
   badge?: string;
   desc: string;
   iconName: string;
-  gameRoute: 'wingo' | 'aviator' | 'k3' | 'trx' | 'slots';
+  gameRoute: GameRoute;
 }
 
 export interface GameCategoryDefinition {
@@ -232,6 +236,79 @@ export interface WingoUpcomingResult {
   colors: ('Green' | 'Violet' | 'Red')[];
   size: 'Big' | 'Small';
   hash: string;
+  isOverridden: boolean;
+  timeLeft: number;
+}
+
+export interface K3Period {
+  periodId: string;
+  dice: [number, number, number];
+  total: number;
+  size: 'Big' | 'Small';
+  parity: 'Odd' | 'Even';
+  isTriple: boolean;
+  isDouble: boolean;
+  time: string;
+  timestamp: number;
+}
+
+export interface K3UpcomingResult {
+  periodId: string;
+  dice: [number, number, number];
+  total: number;
+  size: 'Big' | 'Small';
+  parity: 'Odd' | 'Even';
+  isTriple: boolean;
+  isDouble: boolean;
+  isOverridden: boolean;
+  timeLeft: number;
+}
+
+export interface TrxPeriod {
+  periodId: string;
+  blockNumber: number;
+  blockHash: string;
+  lastDigit: number;
+  colors: ('Green' | 'Violet' | 'Red')[];
+  size: 'Big' | 'Small';
+  time: string;
+  timestamp: number;
+}
+
+export interface TrxUpcomingResult {
+  periodId: string;
+  blockNumber: number;
+  blockHash: string;
+  lastDigit: number;
+  colors: ('Green' | 'Violet' | 'Red')[];
+  size: 'Big' | 'Small';
+  isOverridden: boolean;
+  timeLeft: number;
+}
+
+export interface AviatorUpcomingResult {
+  roundId: string;
+  crashMultiplier: number;
+  flightDurationSec: number;
+  isOverridden: boolean;
+  phase: 'countdown' | 'flying' | 'crashed';
+  countdownLeft: number;
+}
+
+export interface DragonTigerPeriod {
+  roundId: string;
+  dragonCard: { rank: number; label: string; suit: '♠' | '♥' | '♦' | '♣'; color: 'red' | 'black' };
+  tigerCard: { rank: number; label: string; suit: '♠' | '♥' | '♦' | '♣'; color: 'red' | 'black' };
+  winner: 'dragon' | 'tiger' | 'tie';
+  time: string;
+  timestamp: number;
+}
+
+export interface DragonTigerUpcomingResult {
+  roundId: string;
+  dragonCard: { rank: number; label: string; suit: '♠' | '♥' | '♦' | '♣'; color: 'red' | 'black' };
+  tigerCard: { rank: number; label: string; suit: '♠' | '♥' | '♦' | '♣'; color: 'red' | 'black' };
+  winner: 'dragon' | 'tiger' | 'tie';
   isOverridden: boolean;
   timeLeft: number;
 }

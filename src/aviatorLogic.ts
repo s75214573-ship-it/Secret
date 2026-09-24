@@ -2,6 +2,10 @@ import { AviatorRoundRecord } from './types';
 
 export const ONE_HOUR_MS = 60 * 60 * 1000;
 
+// Authentic Spribe Aviator curve coefficient
+// Slower, thrilling real-time rise allowing genuine suspense and user reaction
+export const AVIATOR_GROWTH_RATE = 0.065;
+
 export function getMultiplierTier(mult: number): 'low' | 'medium' | 'high' | 'mega' {
   if (mult < 2.0) return 'low';
   if (mult < 5.0) return 'medium';
@@ -12,6 +16,32 @@ export function getMultiplierTier(mult: number): 'low' | 'medium' | 'high' | 'me
 export function filterLastOneHour<T extends { timestamp: number }>(items: T[]): T[] {
   const cutoff = Date.now() - ONE_HOUR_MS;
   return items.filter(item => item.timestamp >= cutoff);
+}
+
+/**
+ * Calculates current flight multiplier at given flight elapsed seconds.
+ * Pacing:
+ * 0s -> 1.00x
+ * 5s -> 1.38x
+ * 8s -> 1.68x
+ * 11s -> 2.04x
+ * 18s -> 3.22x
+ * 25s -> 5.08x
+ * 35s -> 9.73x
+ */
+export function getAviatorMultiplierAtSec(flightSec: number): number {
+  if (flightSec <= 0) return 1.00;
+  const mult = 1.00 * Math.exp(AVIATOR_GROWTH_RATE * flightSec);
+  return Number(mult.toFixed(2));
+}
+
+/**
+ * Calculates total flight duration required to reach a specific crash multiplier
+ */
+export function getAviatorFlightDurationSec(crashMultiplier: number): number {
+  if (crashMultiplier <= 1.01) return 0.8;
+  const sec = Math.log(Math.max(1.01, crashMultiplier)) / AVIATOR_GROWTH_RATE;
+  return Number(Math.max(0.8, Number(sec.toFixed(1))));
 }
 
 export function getDeterministicAviatorCrash(roundIndex: number): number {
@@ -60,7 +90,7 @@ export function generateHistoricalAviatorRounds(count: number = 80): AviatorRoun
   const list: AviatorRoundRecord[] = [];
   const now = Date.now();
   const intervalMs = Math.floor(ONE_HOUR_MS / Math.max(count, 60));
-  let currentBaseId = Math.floor(now / 15000);
+  let currentBaseId = Math.floor(now / 35000);
 
   for (let i = 0; i < count; i++) {
     const timestamp = now - i * intervalMs;
@@ -70,8 +100,7 @@ export function generateHistoricalAviatorRounds(count: number = 80): AviatorRoun
     const roundIndex = currentBaseId - i;
     const roundId = `AV-${roundIndex}`;
     const crashMultiplier = getDeterministicAviatorCrash(roundIndex);
-    // Estimate flight duration based on multiplier curve
-    const flightDurationSec = Number((Math.pow(crashMultiplier - 1.0, 1 / 1.65) / 0.75).toFixed(1));
+    const flightDurationSec = getAviatorFlightDurationSec(crashMultiplier);
     const hash = Math.abs(roundIndex * 2654435761).toString(16).toUpperCase().padStart(8, '0');
     const d = new Date(timestamp);
     const time = `${d.getHours().toString().padStart(2, '0')}:${d.getMinutes().toString().padStart(2, '0')}:${d.getSeconds().toString().padStart(2, '0')}`;
@@ -79,7 +108,7 @@ export function generateHistoricalAviatorRounds(count: number = 80): AviatorRoun
     list.push({
       roundId,
       crashMultiplier,
-      flightDurationSec: Math.max(0.5, flightDurationSec),
+      flightDurationSec,
       hash,
       time,
       timestamp,

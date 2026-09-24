@@ -24,16 +24,19 @@ import {
   BookOpen,
   Info,
   Clock,
-  HelpCircle
+  HelpCircle,
+  Gem,
+  Bomb,
+  Swords
 } from 'lucide-react';
 import { triggerHaptic } from '../utils/haptics';
 import { RecentWinningMarquee } from './RecentWinningMarquee';
 import { CategoryDefinitionModal } from './CategoryDefinitionModal';
 import { GAME_CATEGORIES } from '../data/categories';
-import { GameCategoryId } from '../types';
+import { GameCategoryId, GameRoute } from '../types';
 
 interface HomeLobbyProps {
-  onSelectGame: (game: 'wingo' | 'aviator' | 'k3' | 'trx' | 'slots') => void;
+  onSelectGame: (game: GameRoute) => void;
   onOpenWallet: (tab?: 'deposit' | 'withdraw') => void;
   onOpenAuth: () => void;
 }
@@ -341,7 +344,7 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('k3');
                 }}
                 className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-amber-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
@@ -367,7 +370,7 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('trx');
                 }}
                 className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-emerald-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
@@ -394,28 +397,28 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
           {/* Originals Category Games */}
           {activeCategory === 'original' && (
             <>
-              {/* Space Rocket X */}
+              {/* Mines VIP Arcade */}
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('aviator');
+                  onSelectGame('mines');
                 }}
-                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-amber-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
+                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-cyan-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
                 <div className="flex items-center justify-between">
-                  <div className="w-7 h-7 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition">
-                    <Zap className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-xl bg-cyan-500/20 flex items-center justify-center text-cyan-400 group-hover:scale-110 transition">
+                    <Gem className="w-4 h-4 text-cyan-300" />
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded font-mono font-bold border border-amber-500/30">
-                    250x Orbit
+                  <span className="text-[10px] px-1.5 py-0.5 bg-cyan-500/10 text-cyan-300 rounded font-mono font-bold border border-cyan-500/30">
+                    Instant Cashout
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs font-black text-white group-hover:text-amber-400 transition">Space Rocket X</div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">High altitude launch with dual cashout triggers.</p>
+                  <div className="text-xs font-black text-white group-hover:text-cyan-400 transition">Mines VIP Arcade</div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">5x5 grid. Find gems, evade bombs, cash out anytime.</p>
                 </div>
-                <div className="text-[11px] font-bold text-amber-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
-                  <span>Launch Rocket</span>
+                <div className="text-[11px] font-bold text-cyan-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
+                  <span>Play Mines</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </div>
               </div>
@@ -451,27 +454,27 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
           {/* Slots Category Games */}
           {activeCategory === 'slots' && (
             <>
-              {/* Super 777 Deluxe */}
+              {/* 777 Vegas VIP Slots */}
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('slots');
                 }}
-                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-purple-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
+                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-amber-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
                 <div className="flex items-center justify-between">
-                  <div className="w-7 h-7 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition">
-                    <Gamepad2 className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition">
+                    <Sparkles className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/10 text-purple-300 rounded font-mono font-bold border border-purple-500/30">
-                    1,000x Mega
+                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded font-mono font-bold border border-amber-500/30">
+                    50x Jackpot
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs font-black text-white group-hover:text-purple-400 transition">Super 777 Deluxe</div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Wild multipliers, free spin rounds &amp; major jackpots.</p>
+                  <div className="text-xs font-black text-white group-hover:text-amber-400 transition">777 Vegas VIP Slots</div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">3-reel classic Vegas slot with progressive jackpot.</p>
                 </div>
-                <div className="text-[11px] font-bold text-purple-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
+                <div className="text-[11px] font-bold text-amber-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
                   <span>Spin Reels</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </div>
@@ -481,24 +484,24 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('slots');
                 }}
-                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-amber-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
+                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-purple-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
                 <div className="flex items-center justify-between">
-                  <div className="w-7 h-7 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition">
-                    <Sparkles className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-xl bg-purple-500/20 flex items-center justify-center text-purple-400 group-hover:scale-110 transition">
+                    <Gamepad2 className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded font-mono font-bold border border-amber-500/30">
-                    500x Gold
+                  <span className="text-[10px] px-1.5 py-0.5 bg-purple-500/10 text-purple-300 rounded font-mono font-bold border border-purple-500/30">
+                    Instant Play
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs font-black text-white group-hover:text-amber-400 transition">Fortune Dragon Reels</div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Cascading reels with progressive multiplier cascades.</p>
+                  <div className="text-xs font-black text-white group-hover:text-purple-400 transition">VIP Deluxe Slots</div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">High roller multipliers with instant cash payouts.</p>
                 </div>
-                <div className="text-[11px] font-bold text-amber-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
-                  <span>Spin Dragon</span>
+                <div className="text-[11px] font-bold text-purple-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
+                  <span>Spin Machine</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </div>
               </div>
@@ -508,54 +511,54 @@ export const HomeLobby: React.FC<HomeLobbyProps> = ({ onSelectGame, onOpenWallet
           {/* Casino Category Games */}
           {activeCategory === 'casino' && (
             <>
-              {/* VIP Speed Baccarat */}
+              {/* Dragon Tiger VIP */}
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('dragontiger');
                 }}
                 className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-rose-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
                 <div className="flex items-center justify-between">
                   <div className="w-7 h-7 rounded-xl bg-rose-500/20 flex items-center justify-center text-rose-400 group-hover:scale-110 transition">
-                    <Crown className="w-4 h-4" />
+                    <Swords className="w-4 h-4 text-rose-400" />
                   </div>
                   <span className="text-[10px] px-1.5 py-0.5 bg-rose-500/10 text-rose-300 rounded font-mono font-bold border border-rose-500/30">
-                    Live HD
+                    18s Fast Deal
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs font-black text-white group-hover:text-rose-400 transition">VIP Speed Baccarat</div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">15-second deal cycles with Player, Banker &amp; Tie bets.</p>
+                  <div className="text-xs font-black text-white group-hover:text-rose-400 transition">Dragon Tiger VIP</div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">Highest single card wins: Dragon, Tiger, or Tie.</p>
                 </div>
                 <div className="text-[11px] font-bold text-rose-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
-                  <span>Join Table</span>
+                  <span>Enter Table</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </div>
               </div>
 
-              {/* Live European Roulette */}
+              {/* VIP Speed Baccarat */}
               <div
                 onClick={() => {
                   triggerHaptic('selection');
-                  onSelectGame('wingo');
+                  onSelectGame('dragontiger');
                 }}
-                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-rose-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
+                className="cursor-pointer bg-gray-900 border border-gray-800 hover:border-amber-500/50 rounded-2xl p-3.5 space-y-2 transition shadow-md group"
               >
                 <div className="flex items-center justify-between">
-                  <div className="w-7 h-7 rounded-xl bg-rose-500/20 flex items-center justify-center text-rose-400 group-hover:scale-110 transition">
-                    <CircleDot className="w-4 h-4" />
+                  <div className="w-7 h-7 rounded-xl bg-amber-500/20 flex items-center justify-center text-amber-400 group-hover:scale-110 transition">
+                    <Crown className="w-4 h-4" />
                   </div>
-                  <span className="text-[10px] px-1.5 py-0.5 bg-rose-500/10 text-rose-300 rounded font-mono font-bold border border-rose-500/30">
-                    36x Wheel
+                  <span className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-300 rounded font-mono font-bold border border-amber-500/30">
+                    Live Table
                   </span>
                 </div>
                 <div>
-                  <div className="text-xs font-black text-white group-hover:text-rose-400 transition">European Roulette</div>
-                  <p className="text-[11px] text-gray-400 mt-0.5">Single-zero wheel with inside numbers &amp; red/black.</p>
+                  <div className="text-xs font-black text-white group-hover:text-amber-400 transition">VIP High Roller Cards</div>
+                  <p className="text-[11px] text-gray-400 mt-0.5">High stakes live table duel with fast continuous rounds.</p>
                 </div>
-                <div className="text-[11px] font-bold text-rose-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
-                  <span>Place Bets</span>
+                <div className="text-[11px] font-bold text-amber-400 flex items-center justify-between pt-1 border-t border-gray-800/80">
+                  <span>Join Table</span>
                   <ChevronRight className="w-3.5 h-3.5" />
                 </div>
               </div>
