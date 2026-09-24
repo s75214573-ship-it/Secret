@@ -23,6 +23,7 @@ import { TabTransitionSkeleton, AppTab } from './components/TabTransitionSkeleto
 import { FloatingSupportButton } from './components/FloatingSupportButton';
 import { CustomerSupportModal } from './components/CustomerSupportModal';
 import { ErrorBoundary } from './components/ErrorBoundary';
+import { WinXbetLogo } from './components/WinXbetLogo';
 import { useInactivityTimer } from './hooks/useInactivityTimer';
 import { useAndroidInstallPrompt } from './hooks/useAndroidInstallPrompt';
 import { AndroidInstallModal } from './components/AndroidInstallModal';
@@ -134,17 +135,17 @@ function AppContent() {
     return (
       <div className="min-h-screen bg-black text-gray-100 flex flex-col items-center justify-center font-sans p-4">
         <div className="flex flex-col items-center space-y-4 text-center">
-          <div className="w-16 h-16 rounded-2xl bg-gradient-to-tr from-red-600 via-rose-500 to-amber-500 flex items-center justify-center font-black text-white text-2xl shadow-xl shadow-red-500/30 animate-pulse">
-            WX
+          <div className="w-24 h-24 rounded-3xl bg-black border border-amber-500/40 p-1.5 shadow-2xl shadow-amber-500/20 flex items-center justify-center overflow-hidden animate-pulse">
+            <img src="/images/winxbet_logo.png" alt="WinXbet" className="w-full h-full object-cover scale-110" />
           </div>
           <div>
-            <div className="text-xl font-black tracking-wider text-white flex items-center justify-center gap-1.5 leading-none">
-              <span>WinXbet</span>
+            <div className="text-2xl font-black tracking-wider text-white flex items-center justify-center gap-1.5 leading-none">
+              <span className="font-black italic">win<span className="text-amber-400">X</span><span className="text-amber-400">bet</span></span>
               <span className="text-amber-400 text-xs px-2 py-0.5 bg-amber-400/10 rounded-md border border-amber-400/30 font-extrabold">
                 VIP
               </span>
             </div>
-            <p className="text-xs text-gray-400 mt-1">Authenticating VIP Gaming Session...</p>
+            <p className="text-xs text-gray-400 mt-1.5">Authenticating VIP Gaming Session...</p>
           </div>
           <div className="flex items-center gap-2 text-xs text-amber-400/80 font-medium">
             <div className="w-4 h-4 border-2 border-amber-400 border-t-transparent rounded-full animate-spin" />
@@ -167,42 +168,33 @@ function AppContent() {
       <div className="w-full max-w-md mx-auto min-h-screen flex flex-col bg-gray-950 shadow-2xl relative main-content-safe">
         
         {/* WinXbet Header */}
-        <header className="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-md border-b border-gray-800/80 px-4 py-3 pt-safe flex items-center justify-between">
+        <header className="sticky top-0 z-40 bg-gray-950/95 backdrop-blur-md border-b border-gray-800/80 px-4 py-2.5 pt-safe flex items-center justify-between">
           <div 
             onClick={() => handleSwitchTab('home')}
-            className="flex items-center gap-2 cursor-pointer"
+            className="flex items-center cursor-pointer select-none"
           >
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-red-600 via-rose-500 to-amber-500 flex items-center justify-center font-black text-white text-base tracking-tighter shadow-md shadow-red-500/30">
-              WX
-            </div>
-            <div>
-              <div className="text-base font-black text-white tracking-wider flex items-center gap-1 leading-none">
-                <span>WinXbet</span>
-                <span className="text-amber-400 text-xs px-1.5 py-0.5 bg-amber-400/10 rounded border border-amber-400/20">
-                  VIP
+            <WinXbetLogo 
+              size="sm" 
+              showVipBadge={true} 
+              showSubtitle={true}
+              adminBadge={isAdmin ? (
+                <span 
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    triggerHaptic('medium');
+                    setAdminConsoleOpen(true);
+                  }}
+                  className="text-amber-300 text-[10px] px-1.5 py-0.5 bg-gradient-to-r from-amber-500/20 to-red-500/20 rounded border border-amber-500/40 font-black cursor-pointer flex items-center gap-1 shadow-sm hover:border-amber-400 transition ml-1"
+                  title="Open Platform Admin Console"
+                >
+                  <Crown className="w-3 h-3 text-amber-400" />
+                  <span>ADMIN</span>
+                  {pendingRequestsCount > 0 && (
+                    <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
+                  )}
                 </span>
-                {isAdmin && (
-                  <span 
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      triggerHaptic('medium');
-                      setAdminConsoleOpen(true);
-                    }}
-                    className="text-amber-300 text-[10px] px-1.5 py-0.5 bg-gradient-to-r from-amber-500/20 to-red-500/20 rounded border border-amber-500/40 font-black cursor-pointer flex items-center gap-1 shadow-sm hover:border-amber-400 transition"
-                    title="Open Platform Admin Console"
-                  >
-                    <Crown className="w-3 h-3 text-amber-400" />
-                    <span>ADMIN</span>
-                    {pendingRequestsCount > 0 && (
-                      <span className="w-2 h-2 rounded-full bg-red-500 animate-ping" />
-                    )}
-                  </span>
-                )}
-              </div>
-              <div className="text-[10px] text-gray-400 font-medium tracking-wide">
-                Fair Lottery &amp; Prediction
-              </div>
-            </div>
+              ) : undefined}
+            />
           </div>
 
           <div className="flex items-center gap-2">

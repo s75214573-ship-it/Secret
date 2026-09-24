@@ -147,6 +147,39 @@ export const RecentWinningMarquee: React.FC<RecentWinningMarqueeProps> = ({ onSe
   const [isPaused, setIsPaused] = useState(false);
   const [latestBigWin, setLatestBigWin] = useState<WinningRecord | null>(null);
 
+  // Paid out counter increasing by 100 every second
+  const [paidOutAmount, setPaidOutAmount] = useState<number>(() => {
+    if (typeof window !== 'undefined') {
+      const stored = localStorage.getItem('winxbet_paid_out_today');
+      const storedTime = localStorage.getItem('winxbet_paid_out_timestamp');
+      if (stored && storedTime) {
+        const elapsedSeconds = Math.floor((Date.now() - Number(storedTime)) / 1000);
+        if (elapsedSeconds > 0 && elapsedSeconds < 86400) {
+          return Number(stored) + elapsedSeconds * 100;
+        }
+        if (Number(stored) >= 4829150) {
+          return Number(stored);
+        }
+      }
+    }
+    return 4829150;
+  });
+
+  useEffect(() => {
+    const timer = setInterval(() => {
+      setPaidOutAmount(prev => {
+        const next = prev + 100;
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('winxbet_paid_out_today', String(next));
+          localStorage.setItem('winxbet_paid_out_timestamp', String(Date.now()));
+        }
+        return next;
+      });
+    }, 1000);
+
+    return () => clearInterval(timer);
+  }, []);
+
   // Live win simulator: periodically appends realistic user wins to keep marquee dynamic
   useEffect(() => {
     const interval = setInterval(() => {
@@ -256,7 +289,9 @@ export const RecentWinningMarquee: React.FC<RecentWinningMarqueeProps> = ({ onSe
 
         <div className="flex items-center gap-2 text-[11px]">
           <span className="text-gray-400">Paid Out Today:</span>
-          <span className="text-emerald-400 font-black font-mono">₹48,29,150+</span>
+          <span className="text-emerald-400 font-black font-mono tabular-nums transition-all duration-300">
+            ₹{paidOutAmount.toLocaleString('en-IN')}+
+          </span>
         </div>
       </div>
 

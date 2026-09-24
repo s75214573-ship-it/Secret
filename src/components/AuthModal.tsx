@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { triggerHaptic } from '../utils/haptics';
 import { BotCaptcha } from './BotCaptcha';
+import { WinXbetLogo } from './WinXbetLogo';
 import confetti from 'canvas-confetti';
 
 interface AuthModalProps {
@@ -202,14 +203,13 @@ export const AuthModal: React.FC<AuthModalProps> = ({
         </button>
 
         {/* Modal Header */}
-        <div className="flex items-center gap-3 pr-8">
-          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-red-600 to-amber-500 flex items-center justify-center text-white shadow-lg shadow-red-600/30 shrink-0">
-            <Sparkles className="w-5 h-5 text-amber-300" />
-          </div>
-          <div>
-            <h3 className="font-black text-white text-base leading-tight">WinXbet VIP</h3>
-            <p className="text-[11px] text-gray-400">Color Prediction &amp; Real-Time Lottery</p>
-          </div>
+        <div className="flex items-center justify-between pr-8">
+          <WinXbetLogo 
+            size="sm" 
+            showVipBadge={true} 
+            showSubtitle={true} 
+            subtitleText="Color Prediction & Real-Time Lottery" 
+          />
         </div>
 
         {/* Tabs */}

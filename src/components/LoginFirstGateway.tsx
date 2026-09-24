@@ -23,6 +23,7 @@ import {
 import { triggerHaptic } from '../utils/haptics';
 import confetti from 'canvas-confetti';
 import { BotCaptcha } from './BotCaptcha';
+import { WinXbetLogo } from './WinXbetLogo';
 
 export const LoginFirstGateway: React.FC = () => {
   const { 
@@ -228,24 +229,14 @@ export const LoginFirstGateway: React.FC = () => {
 
       <div className="relative z-10 space-y-3.5 pt-2">
         {/* Top VIP Branding Header */}
-        <div className="text-center space-y-2 pt-2">
-          <div className="flex items-center justify-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-gradient-to-br from-red-600 to-amber-500 p-0.5 shadow-xl shadow-red-600/30 flex items-center justify-center shrink-0">
-              <div className="w-full h-full bg-gray-950 rounded-[14px] flex items-center justify-center">
-                <ShieldCheck className="w-7 h-7 text-amber-400" />
-              </div>
-            </div>
-            <div className="text-left">
-              <div className="text-2xl font-black text-white tracking-wider flex items-center gap-1.5 leading-none">
-                <span>WinXbet</span>
-                <span className="text-amber-400 text-xs px-2 py-0.5 bg-amber-400/10 rounded-md border border-amber-400/30 font-extrabold">
-                  VIP
-                </span>
-              </div>
-              <div className="text-[11px] text-gray-400 font-medium mt-0.5">
-                India's Trusted Color Prediction &amp; Lottery
-              </div>
-            </div>
+        <div className="text-center space-y-3 pt-2">
+          <div className="flex items-center justify-center">
+            <WinXbetLogo 
+              size="lg" 
+              showVipBadge={true} 
+              showSubtitle={true}
+              subtitleText="India's Trusted Color Prediction & Lottery"
+            />
           </div>
 
           <div className="inline-flex items-center gap-1.5 px-3 py-1 bg-gray-900/80 border border-gray-800 rounded-full text-[11px] text-gray-300">

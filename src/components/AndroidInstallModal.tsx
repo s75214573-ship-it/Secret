@@ -12,6 +12,7 @@ import {
   ExternalLink
 } from 'lucide-react';
 import { triggerHaptic } from '../utils/haptics';
+import { WinXbetLogo } from './WinXbetLogo';
 
 interface AndroidInstallModalProps {
   isOpen: boolean;
@@ -39,9 +40,7 @@ export const AndroidInstallModal: React.FC<AndroidInstallModalProps> = ({
         {/* Header */}
         <div className="flex items-center justify-between pb-3 border-b border-gray-800">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-2xl bg-gradient-to-tr from-red-600 via-rose-500 to-amber-500 flex items-center justify-center font-black text-white text-lg tracking-tighter shadow-md shadow-red-500/30">
-              WX
-            </div>
+            <WinXbetLogo variant="icon" size="md" />
             <div>
               <div className="flex items-center gap-2">
                 <h3 className="font-black text-white text-base">WinXbet VIP Android</h3>
