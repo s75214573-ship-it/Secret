@@ -2,6 +2,7 @@ import React, { useState, useMemo } from 'react';
 import { WingoPeriod, GameBet } from '../types';
 import { PaginationControls } from './PaginationControls';
 import { WingoVisualTrendChart } from './WingoVisualTrendChart';
+import { useContinuousGame } from '../context/ContinuousGameContext';
 import { triggerHaptic } from '../utils/haptics';
 import { 
   History, 
@@ -15,7 +16,9 @@ import {
   Snowflake, 
   Clock,
   Sparkles,
-  BarChart3
+  BarChart3,
+  Activity,
+  Users
 } from 'lucide-react';
 
 interface WingoHistoryPagesProps {
@@ -38,7 +41,22 @@ export const WingoHistoryPages: React.FC<WingoHistoryPagesProps> = ({
   onSelectBet
 }) => {
   // Navigation between distinct pages (not a single sheet)
-  const [activePage, setActivePage] = useState<'records' | 'trends' | 'my_bets' | 'security'>('records');
+  const [activePage, setActivePage] = useState<'records' | 'trends' | 'live_bets' | 'my_bets' | 'security'>('records');
+
+  const { liveGlobalBets, wingoCurrentPeriod, wingoTimeLeft } = useContinuousGame();
+
+  // Active round bets calculation
+  const activeWingoBets = useMemo(() => {
+    return liveGlobalBets.filter(b => {
+      const matchGame = b.gameType === 'wingo' || !b.gameType;
+      const matchPeriod = !wingoCurrentPeriod || String(b.periodId) === String(wingoCurrentPeriod);
+      return matchGame && matchPeriod;
+    });
+  }, [liveGlobalBets, wingoCurrentPeriod]);
+
+  const activeRoundTotalPool = useMemo(() => {
+    return activeWingoBets.reduce((sum, b) => sum + (b.amount || 0), 0);
+  }, [activeWingoBets]);
 
   // Page 1 (Game Records) state
   const [recordFilter, setRecordFilter] = useState<'all' | 'big' | 'small' | 'green' | 'red' | 'violet'>('all');
@@ -175,6 +193,27 @@ export const WingoHistoryPages: React.FC<WingoHistoryPagesProps> = ({
           >
             <BarChart3 className="w-3.5 h-3.5" />
             <span>1-Hr Trends</span>
+          </button>
+
+          <button
+            id="page-tab-livebets"
+            onClick={() => {
+              triggerHaptic('light');
+              setActivePage('live_bets');
+            }}
+            className={`flex-1 py-2 px-2.5 rounded-xl text-xs font-black uppercase tracking-wider transition flex items-center justify-center gap-1.5 shrink-0 ${
+              activePage === 'live_bets'
+                ? 'bg-gradient-to-r from-emerald-600 to-teal-600 text-white shadow-md shadow-emerald-600/30'
+                : 'text-gray-400 hover:text-white hover:bg-gray-900'
+            }`}
+          >
+            <Activity className="w-3.5 h-3.5 text-emerald-400 animate-pulse" />
+            <span>Live Bets</span>
+            {activeWingoBets.length > 0 && (
+              <span className="text-[10px] px-1 py-0.2 rounded-full bg-black/40 font-mono text-emerald-300">
+                {activeWingoBets.length}
+              </span>
+            )}
           </button>
 
           <button
@@ -571,6 +610,133 @@ export const WingoHistoryPages: React.FC<WingoHistoryPagesProps> = ({
               <span>Anti-Frontrunning Bet Lock Window:</span>
               <span className="text-amber-400">Last 5 seconds of round</span>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* PAGE: LIVE BETS & ACTIVE POOL MONITOR */}
+      {activePage === 'live_bets' && (
+        <div className="p-4 space-y-4">
+          {/* Active Round Header Banner */}
+          <div className="bg-gray-950 border border-emerald-500/30 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <div className="flex items-center gap-2">
+                <Activity className="w-4 h-4 text-emerald-400 animate-pulse" />
+                <h4 className="text-sm font-black text-white">
+                  Round #{wingoCurrentPeriod} Live Bets Pool
+                </h4>
+                <span className="px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-mono font-bold">
+                  {wingoTimeLeft}s left
+                </span>
+              </div>
+              <p className="text-[11px] text-gray-400 mt-1">
+                Real-time stream of all user bets placed in the currently ticking WinGo period.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <div className="text-right">
+                <span className="text-[10px] text-gray-500 uppercase block">Total Pool Volume</span>
+                <span className="text-lg font-black text-amber-400 font-mono">
+                  ₹{activeRoundTotalPool.toLocaleString()}
+                </span>
+              </div>
+              <div className="text-right pl-3 border-l border-gray-800">
+                <span className="text-[10px] text-gray-500 uppercase block">Total Bets</span>
+                <span className="text-lg font-black text-white font-mono">
+                  {activeWingoBets.length}
+                </span>
+              </div>
+            </div>
+          </div>
+
+          {/* Color & Size Distribution Grid */}
+          <div className="grid grid-cols-2 sm:grid-cols-5 gap-2">
+            {[
+              { sel: 'Green', color: 'text-emerald-400', bg: 'bg-emerald-950/40 border-emerald-500/30' },
+              { sel: 'Red', color: 'text-rose-400', bg: 'bg-rose-950/40 border-rose-500/30' },
+              { sel: 'Violet', color: 'text-purple-400', bg: 'bg-purple-950/40 border-purple-500/30' },
+              { sel: 'Big', color: 'text-amber-400', bg: 'bg-amber-950/40 border-amber-500/30' },
+              { sel: 'Small', color: 'text-blue-400', bg: 'bg-blue-950/40 border-blue-500/30' }
+            ].map(item => {
+              const count = activeWingoBets.filter(b => b.selection === item.sel).length;
+              const vol = activeWingoBets
+                .filter(b => b.selection === item.sel)
+                .reduce((s, b) => s + (b.amount || 0), 0);
+              return (
+                <div key={item.sel} className={`rounded-xl border p-2.5 ${item.bg}`}>
+                  <div className="flex items-center justify-between text-xs font-bold">
+                    <span className={item.color}>{item.sel}</span>
+                    <span className="text-[10px] text-gray-400 font-mono">{count} bets</span>
+                  </div>
+                  <div className="text-sm font-black font-mono text-white mt-1">
+                    ₹{vol.toLocaleString()}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* Live Bets Table */}
+          <div className="overflow-x-auto rounded-2xl border border-gray-800 bg-gray-950">
+            <table className="w-full text-left text-xs">
+              <thead>
+                <tr className="border-b border-gray-800 bg-gray-900/50 text-[10px] text-gray-400 uppercase tracking-wider">
+                  <th className="py-2 px-3">Player</th>
+                  <th className="py-2 px-3">Selection</th>
+                  <th className="py-2 px-3">Stake Amount</th>
+                  <th className="py-2 px-3">Placed Time</th>
+                  <th className="py-2 px-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-800/40">
+                {activeWingoBets.length === 0 ? (
+                  <tr>
+                    <td colSpan={5} className="py-8 text-center text-gray-500">
+                      <Users className="w-5 h-5 mx-auto mb-1 opacity-40 text-gray-400" />
+                      <p className="text-xs font-semibold">No bets placed in Round #{wingoCurrentPeriod} yet.</p>
+                      <p className="text-[10px] text-gray-600 mt-0.5">Player bets will show up here dynamically.</p>
+                    </td>
+                  </tr>
+                ) : (
+                  activeWingoBets.map((bet) => {
+                    const sel = bet.selection;
+                    const isNum = /^[0-9]$/.test(sel);
+                    const badgeStyle = sel === 'Green' ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40' :
+                                       sel === 'Red' ? 'bg-rose-500/20 text-rose-300 border-rose-500/40' :
+                                       sel === 'Violet' ? 'bg-purple-500/20 text-purple-300 border-purple-500/40' :
+                                       sel === 'Big' ? 'bg-amber-500/20 text-amber-300 border-amber-500/40' :
+                                       sel === 'Small' ? 'bg-blue-500/20 text-blue-300 border-blue-500/40' :
+                                       'bg-gray-800 text-amber-400 border-gray-700 font-mono';
+
+                    return (
+                      <tr key={bet.betId || (bet as any).id} className="hover:bg-gray-900/40 transition-colors">
+                        <td className="py-2 px-3 font-mono font-bold text-white text-xs">
+                          {bet.userPhone || 'Player'}
+                        </td>
+                        <td className="py-2 px-3">
+                          <span className={`inline-flex items-center px-2 py-0.5 rounded-lg border text-[11px] font-bold ${badgeStyle}`}>
+                            {isNum ? `Num ${sel}` : sel}
+                          </span>
+                        </td>
+                        <td className="py-2 px-3 font-mono font-black text-amber-400">
+                          ₹{(bet.amount || 0).toLocaleString()}
+                        </td>
+                        <td className="py-2 px-3 font-mono text-[10px] text-gray-400">
+                          {bet.createdAt ? new Date(bet.createdAt).toLocaleTimeString() : 'Just now'}
+                        </td>
+                        <td className="py-2 px-3 text-right">
+                          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded-full bg-amber-400/10 text-amber-300 border border-amber-400/30 text-[9px] font-bold">
+                            <Clock className="w-2.5 h-2.5" />
+                            Pending
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
           </div>
         </div>
       )}

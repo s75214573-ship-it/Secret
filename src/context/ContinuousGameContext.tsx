@@ -148,8 +148,11 @@ interface ContinuousGameContextType {
   cashoutAviatorBet: () => Promise<{ success: boolean; winAmount: number; multiplier: number } | null>;
   cancelQueuedAviatorBet: () => void;
   aviatorOverrides: Record<string, number>;
+  aviatorGlobalTarget: number | null;
   adminSetAviatorOverride: (roundId: string, crashPoint: number) => Promise<{ success: boolean; message: string }>;
   adminClearAviatorOverride: (roundId: string) => Promise<{ success: boolean; message: string }>;
+  adminSetGlobalAviatorTarget: (target: number | null) => Promise<{ success: boolean; message: string }>;
+  adminEmergencyCrashNow: () => Promise<{ success: boolean; message: string }>;
   getAviatorUpcomingForecast: (count?: number) => AviatorUpcomingResult[];
   aviatorUpcomingResult: AviatorUpcomingResult;
 
@@ -217,7 +220,109 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   const [lastPurgeTime, setLastPurgeTime] = useState<string>(() => new Date().toLocaleTimeString());
 
   // Global synchronized live bets stream
-  const [liveGlobalBets, setLiveGlobalBets] = useState<GlobalBet[]>([]);
+  const [liveGlobalBets, setLiveGlobalBets] = useState<GlobalBet[]>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_global_bets');
+      if (stored) return JSON.parse(stored);
+    } catch {}
+    return [];
+  });
+
+  // 1. Listen to Firestore collection 'globalBets'
+  useEffect(() => {
+    try {
+      const q = query(collection(db, 'globalBets'), limit(80));
+      const unsub = onSnapshot(q, (snapshot) => {
+        const docs: GlobalBet[] = [];
+        snapshot.forEach(d => {
+          docs.push({ id: d.id, ...d.data() } as any);
+        });
+        if (docs.length > 0) {
+          setLiveGlobalBets(prev => {
+            const map = new Map<string, GlobalBet>();
+            docs.forEach(b => {
+              const k = b.betId || b.id || `${b.userId}-${b.periodId}-${b.selection}`;
+              map.set(k, b);
+            });
+            prev.forEach(b => {
+              const k = b.betId || b.id || `${b.userId}-${b.periodId}-${b.selection}`;
+              if (!map.has(k)) map.set(k, b);
+            });
+            const list = Array.from(map.values()).sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
+            try { localStorage.setItem('winxbet_global_bets', JSON.stringify(list.slice(0, 100))); } catch {}
+            return list.slice(0, 100);
+          });
+        }
+      }, () => {});
+      return () => unsub();
+    } catch {}
+  }, []);
+
+  // 2. Real-time local bet listener (zero latency for active player)
+  useEffect(() => {
+    const handleBetPlaced = (e: any) => {
+      if (e?.detail?.bet) {
+        setLiveGlobalBets(prev => {
+          const incoming: GlobalBet = e.detail.bet;
+          const next = [incoming, ...prev.filter(b => b.betId !== incoming.betId)].slice(0, 100);
+          try { localStorage.setItem('winxbet_global_bets', JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
+    };
+    window.addEventListener('winxbet_bet_placed', handleBetPlaced);
+    return () => window.removeEventListener('winxbet_bet_placed', handleBetPlaced);
+  }, []);
+
+  // 3. Autonomous active betting engine for Wingo so live pools and participant wagers are always visible
+  useEffect(() => {
+    const seedInterval = setInterval(() => {
+      const period = wingoCurrentPeriodRef.current;
+      const timeLeft = 60 - (Math.floor(Date.now() / 1000) % 60);
+      if (timeLeft > 5 && Math.random() > 0.30) {
+        const prefixes = ['98', '87', '91', '70', '95', '88', '79', '94', '96', '89'];
+        const phone = `${prefixes[Math.floor(Math.random() * prefixes.length)]}***${Math.floor(1000 + Math.random() * 9000)}`;
+        const choices = ['Green', 'Red', 'Violet', 'Big', 'Small', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9'];
+        const weights = [0.24, 0.24, 0.06, 0.20, 0.16, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01, 0.01];
+        const r = Math.random();
+        let cum = 0;
+        let selected = 'Green';
+        for (let i = 0; i < choices.length; i++) {
+          cum += weights[i];
+          if (r <= cum) {
+            selected = choices[i];
+            break;
+          }
+        }
+        const stakes = [100, 200, 500, 1000, 2000, 5000];
+        const amount = stakes[Math.floor(Math.random() * stakes.length)];
+        const simBet: GlobalBet = {
+          betId: `wb-${Date.now()}-${Math.floor(Math.random() * 1000)}`,
+          userId: `usr_${phone}`,
+          userDisplayName: `User ${phone.slice(-4)}`,
+          userPhone: phone,
+          gameType: 'wingo',
+          periodId: period,
+          selection: selected,
+          amount,
+          multiplier: 1,
+          netAmount: Number((amount * 0.97).toFixed(2)),
+          fee: Number((amount * 0.03).toFixed(2)),
+          status: 'pending',
+          createdAt: new Date().toISOString(),
+          timestamp: Date.now()
+        };
+
+        setLiveGlobalBets(prev => {
+          const next = [simBet, ...prev.slice(0, 99)];
+          try { localStorage.setItem('winxbet_global_bets', JSON.stringify(next)); } catch {}
+          return next;
+        });
+      }
+    }, 2800);
+
+    return () => clearInterval(seedInterval);
+  }, []);
 
   // ==========================================
   // 1. WINGO STATE & CONTINUOUS TIMELINE
@@ -925,6 +1030,23 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
   const aviatorOverridesRef = useRef<Record<string, number>>(aviatorOverrides);
   aviatorOverridesRef.current = aviatorOverrides;
 
+  // Global persistent crash target (applies to all rounds if set)
+  const [aviatorGlobalTarget, setAviatorGlobalTarget] = useState<number | null>(() => {
+    try {
+      const stored = localStorage.getItem('winxbet_aviator_global_target');
+      return stored ? Number(stored) : null;
+    } catch {
+      return null;
+    }
+  });
+  const aviatorGlobalTargetRef = useRef<number | null>(aviatorGlobalTarget);
+  aviatorGlobalTargetRef.current = aviatorGlobalTarget;
+
+  const aviatorCurrentRoundIdRef = useRef<string>(aviatorCurrentRoundId);
+  aviatorCurrentRoundIdRef.current = aviatorCurrentRoundId;
+  const aviatorMultiplierRef = useRef<number>(aviatorMultiplier);
+  aviatorMultiplierRef.current = aviatorMultiplier;
+
   useEffect(() => {
     try {
       const unsub = onSnapshot(doc(db, 'system', 'aviatorOverrides'), (snap) => {
@@ -932,7 +1054,16 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
           setAviatorOverrides(prev => ({ ...prev, ...(snap.data() as any) }));
         }
       });
-      return () => unsub();
+      const unsubTarget = onSnapshot(doc(db, 'system', 'aviatorGlobalTarget'), (snap) => {
+        if (snap.exists()) {
+          const val = snap.data()?.target;
+          setAviatorGlobalTarget(val !== undefined && val !== null ? Number(val) : null);
+        }
+      });
+      return () => {
+        unsub();
+        unsubTarget();
+      };
     } catch {}
   }, []);
 
@@ -944,10 +1075,65 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       try { localStorage.setItem('winxbet_aviator_overrides', JSON.stringify(next)); } catch {}
       return next;
     });
+
+    if (roundId === aviatorCurrentRoundIdRef.current) {
+      setAviatorCrashPoint(cleanCrash);
+      if (aviatorMultiplierRef.current >= cleanCrash) {
+        setAviatorMultiplier(cleanCrash);
+        setAviatorPhase('crashed');
+      }
+    }
+
     try {
       await setDoc(doc(db, 'system', 'aviatorOverrides'), { [roundId]: cleanCrash }, { merge: true });
     } catch {}
     return { success: true, message: `Aviator Flight #${roundId} crash point locked to ${cleanCrash}x!` };
+  }, []);
+
+  const adminSetGlobalAviatorTarget = useCallback(async (target: number | null) => {
+    if (target !== null && target < 1.00) return { success: false, message: 'Target crash must be at least 1.00x' };
+    const clean = target !== null ? Number(target.toFixed(2)) : null;
+    setAviatorGlobalTarget(clean);
+    try {
+      if (clean !== null) {
+        localStorage.setItem('winxbet_aviator_global_target', String(clean));
+        await setDoc(doc(db, 'system', 'aviatorGlobalTarget'), { target: clean }, { merge: true });
+      } else {
+        localStorage.removeItem('winxbet_aviator_global_target');
+        await setDoc(doc(db, 'system', 'aviatorGlobalTarget'), { target: null }, { merge: true });
+      }
+    } catch {}
+    return {
+      success: true,
+      message: clean !== null
+        ? `Global Aviator target locked to ${clean}x for all flights!`
+        : 'Global Aviator target cleared. Restored to Dynamic Fair RNG.'
+    };
+  }, []);
+
+  const adminEmergencyCrashNow = useCallback(async () => {
+    const currentRoundId = aviatorCurrentRoundIdRef.current;
+    const currentMult = aviatorMultiplierRef.current || 1.00;
+    const cleanCrash = Math.max(1.00, Number(currentMult.toFixed(2)));
+
+    setAviatorCrashPoint(cleanCrash);
+    setAviatorMultiplier(cleanCrash);
+    setAviatorPhase('crashed');
+
+    setAviatorOverrides(prev => {
+      const next = { ...prev, [currentRoundId]: cleanCrash };
+      try { localStorage.setItem('winxbet_aviator_overrides', JSON.stringify(next)); } catch {}
+      return next;
+    });
+
+    try {
+      await setDoc(doc(db, 'system', 'aviatorOverrides'), { [currentRoundId]: cleanCrash }, { merge: true });
+    } catch {}
+
+    return {
+      success: true,
+      message: `Emergency crash triggered! Flight #${currentRoundId} crashed at ${cleanCrash}x!`
+    };
   }, []);
 
   const adminClearAviatorOverride = useCallback(async (roundId: string) => {
@@ -960,23 +1146,26 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
     try {
       await updateDoc(doc(db, 'system', 'aviatorOverrides'), { [roundId]: deleteField() });
     } catch {}
-    return { success: true, message: `Aviator Flight #${roundId} reset to provably fair deterministic trajectory.` };
+    return { success: true, message: `Aviator Flight #${roundId} reset to dynamic trajectory.` };
   }, []);
 
   const aviatorUpcomingResult = useMemo((): AviatorUpcomingResult => {
     const hasOverride = aviatorOverrides[aviatorCurrentRoundId] !== undefined;
+    const globalTarget = aviatorGlobalTarget;
     const currentRoundIdx = Math.floor(Date.now() / AVIATOR_CYCLE_MS);
     const detCrash = getDeterministicAviatorCrash(currentRoundIdx);
-    const crash = hasOverride ? aviatorOverrides[aviatorCurrentRoundId] : detCrash;
+    const crash = hasOverride 
+      ? aviatorOverrides[aviatorCurrentRoundId] 
+      : (globalTarget !== null && globalTarget >= 1.00 ? globalTarget : detCrash);
     return {
       roundId: aviatorCurrentRoundId,
       crashMultiplier: crash,
       flightDurationSec: getAviatorFlightDurationSec(crash),
-      isOverridden: hasOverride,
+      isOverridden: hasOverride || globalTarget !== null,
       phase: aviatorPhase,
       countdownLeft: aviatorCountdownLeft
     };
-  }, [aviatorCurrentRoundId, aviatorOverrides, aviatorPhase, aviatorCountdownLeft]);
+  }, [aviatorCurrentRoundId, aviatorOverrides, aviatorGlobalTarget, aviatorPhase, aviatorCountdownLeft]);
 
   const getAviatorUpcomingForecast = useCallback((count: number = 6): AviatorUpcomingResult[] => {
     const list: AviatorUpcomingResult[] = [];
@@ -986,13 +1175,16 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
       const idx = currentBaseIdx + i;
       const rId = `AV-${idx}`;
       const hasOverride = aviatorOverrides[rId] !== undefined;
+      const globalTarget = aviatorGlobalTargetRef.current;
       const det = getDeterministicAviatorCrash(idx);
-      const crash = hasOverride ? aviatorOverrides[rId] : det;
+      const crash = hasOverride 
+        ? aviatorOverrides[rId] 
+        : (globalTarget !== null && globalTarget >= 1.00 ? globalTarget : det);
       list.push({
         roundId: rId,
         crashMultiplier: crash,
         flightDurationSec: getAviatorFlightDurationSec(crash),
-        isOverridden: hasOverride,
+        isOverridden: hasOverride || globalTarget !== null,
         phase: i === 0 ? aviatorPhase : 'countdown',
         countdownLeft: i === 0 ? aviatorCountdownLeft : (i * (AVIATOR_CYCLE_MS / 1000))
       });
@@ -1012,7 +1204,10 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
 
       const overrideCrash = aviatorOverridesRef.current[roundId];
       const deterministicCrash = getDeterministicAviatorCrash(roundIndex);
-      const crashPoint = overrideCrash !== undefined ? overrideCrash : deterministicCrash;
+      const globalTarget = aviatorGlobalTargetRef.current;
+      const crashPoint = overrideCrash !== undefined 
+        ? overrideCrash 
+        : (globalTarget !== null && globalTarget >= 1.00 ? globalTarget : deterministicCrash);
       const flightDurationSec = getAviatorFlightDurationSec(crashPoint);
       const flightDurationMs = Math.max(1000, flightDurationSec * 1000);
 
@@ -1299,8 +1494,11 @@ export const ContinuousGameProvider: React.FC<{ children: React.ReactNode }> = (
         cashoutAviatorBet,
         cancelQueuedAviatorBet,
         aviatorOverrides,
+        aviatorGlobalTarget,
         adminSetAviatorOverride,
         adminClearAviatorOverride,
+        adminSetGlobalAviatorTarget,
+        adminEmergencyCrashNow,
         getAviatorUpcomingForecast,
         aviatorUpcomingResult,
 

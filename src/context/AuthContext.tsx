@@ -1723,6 +1723,15 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       };
       await setDoc(doc(db, 'globalBets', ref.id), cleanFirestoreData(globalBetDoc));
 
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('winxbet_bet_placed', { detail: { bet: globalBetDoc } }));
+        try {
+          const raw = localStorage.getItem('winxbet_global_bets');
+          const existing = raw ? JSON.parse(raw) : [];
+          localStorage.setItem('winxbet_global_bets', JSON.stringify([globalBetDoc, ...existing].slice(0, 100)));
+        } catch {}
+      }
+
       // 3. Atomically increment the target round's pool in Firestore
       const roundCollection = bet.gameType.startsWith('wingo') ? 'wingoRounds' : 'aviatorRounds';
       const roundRef = doc(db, roundCollection, String(bet.periodId));

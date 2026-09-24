@@ -56,8 +56,13 @@ export const AviatorGame: React.FC<AviatorGameProps> = ({ onOpenWallet, onOpenAu
     retentionWindowMinutes,
     totalPurgedAviatorCount,
     continuousEngineUptimeSec,
-    lastPurgeTime
+    lastPurgeTime,
+    adminSetAviatorOverride,
+    adminClearAviatorOverride,
+    adminEmergencyCrashNow
   } = useContinuousGame();
+
+  const [adminNotice, setAdminNotice] = useState<string | null>(null);
 
   const [betAmount, setBetAmount] = useState<number>(50);
   const [autoCashoutEnabled, setAutoCashoutEnabled] = useState<boolean>(false);
@@ -234,6 +239,80 @@ export const AviatorGame: React.FC<AviatorGameProps> = ({ onOpenWallet, onOpenAu
             })
           )}
         </div>
+
+        {/* Admin Instant Crash Commander */}
+        {profile?.role === 'admin' && (
+          <div className="bg-gray-950 border border-rose-500/30 rounded-2xl p-3 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div className="flex items-center gap-2">
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-ping" />
+                <span className="text-xs font-black text-white flex items-center gap-1.5">
+                  Admin Flight Control:
+                  <span className="font-mono text-amber-400">#{aviatorCurrentRoundId}</span>
+                </span>
+                <span className="text-xs font-mono text-gray-400">
+                  Crash Point: <strong className="text-amber-400 font-bold">{aviatorCrashPoint.toFixed(2)}x</strong>
+                </span>
+              </div>
+
+              {aviatorPhase === 'flying' && (
+                <button
+                  onClick={async () => {
+                    triggerHaptic('heavy');
+                    playCrashSound();
+                    await adminEmergencyCrashNow();
+                    setAdminNotice('CRASHED! Plane terminated immediately.');
+                    setTimeout(() => setAdminNotice(null), 3000);
+                  }}
+                  className="px-3 py-1 bg-gradient-to-r from-red-600 to-rose-600 hover:from-red-500 hover:to-rose-500 text-white font-black text-[11px] rounded-xl uppercase tracking-wider flex items-center gap-1.5 shadow-md shadow-red-900/30 active:scale-95 transition-all"
+                >
+                  <Flame className="w-3.5 h-3.5" />
+                  Crash Now ({aviatorMultiplier.toFixed(2)}x)
+                </button>
+              )}
+            </div>
+
+            <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none">
+              <span className="text-[10px] text-gray-400 shrink-0 font-bold">Lock Crash:</span>
+              {[1.10, 1.35, 1.50, 2.00, 3.50, 5.00, 10.00].map(m => (
+                <button
+                  key={m}
+                  onClick={async () => {
+                    triggerHaptic('medium');
+                    playClickSound();
+                    await adminSetAviatorOverride(aviatorCurrentRoundId, m);
+                    setAdminNotice(`Flight #${aviatorCurrentRoundId} crash locked to ${m}x!`);
+                    setTimeout(() => setAdminNotice(null), 3000);
+                  }}
+                  className={`px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono transition-colors ${
+                    aviatorCrashPoint === m
+                      ? 'bg-amber-400 text-gray-950 font-black'
+                      : 'bg-gray-900 border border-gray-800 text-gray-300 hover:border-amber-400'
+                  }`}
+                >
+                  {m}x
+                </button>
+              ))}
+              <button
+                onClick={async () => {
+                  triggerHaptic('light');
+                  await adminClearAviatorOverride(aviatorCurrentRoundId);
+                  setAdminNotice(`Flight #${aviatorCurrentRoundId} reset to dynamic RNG.`);
+                  setTimeout(() => setAdminNotice(null), 3000);
+                }}
+                className="px-2 py-0.5 rounded-lg text-[10px] font-bold bg-gray-900 border border-gray-800 text-gray-400 hover:text-white"
+              >
+                Reset RNG
+              </button>
+            </div>
+
+            {adminNotice && (
+              <div className="text-[11px] font-bold text-amber-300 bg-amber-400/10 border border-amber-400/30 rounded-xl px-2.5 py-1 animate-fadeIn">
+                {adminNotice}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Flight Radar Canvas Area */}
         <div className="relative h-64 bg-gradient-to-b from-gray-950 via-gray-900 to-black rounded-2xl border border-gray-800/90 overflow-hidden flex flex-col items-center justify-center select-none shadow-inner">

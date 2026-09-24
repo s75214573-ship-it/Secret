@@ -65,7 +65,10 @@ export const AdminConsoleModal: React.FC<AdminConsoleModalProps> = ({ isOpen, on
     wingoTimeLeft, 
     aviatorCurrentRoundId, 
     aviatorPhase, 
-    aviatorMultiplier 
+    aviatorMultiplier,
+    aviatorCrashPoint,
+    adminSetAviatorOverride,
+    adminEmergencyCrashNow
   } = useContinuousGame();
 
   const [activeTab, setActiveTab] = useState<'approvals' | 'live_bets' | 'users' | 'vault' | 'vip_rng' | 'support'>('approvals');
@@ -989,6 +992,52 @@ export const AdminConsoleModal: React.FC<AdminConsoleModalProps> = ({ isOpen, on
                           <div className="text-[10px] text-gray-400 font-mono">
                             Round {aviatorCurrentRoundId}
                           </div>
+                        </div>
+                      </div>
+
+                      {/* Aviator Crash Override Controller */}
+                      <div className="p-3 bg-gray-950/80 border border-rose-500/40 rounded-xl space-y-2">
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-1.5">
+                            <Plane className="w-3.5 h-3.5 text-rose-400" />
+                            <span className="font-black text-xs text-white">Aviator Crash Commander</span>
+                          </div>
+                          <span className="text-[10px] font-mono text-amber-400 font-bold">
+                            Target: {aviatorCrashPoint.toFixed(2)}x
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-none">
+                          {[1.10, 1.40, 2.00, 3.50, 5.00, 10.00].map(m => (
+                            <button
+                              key={m}
+                              onClick={async () => {
+                                triggerHaptic('medium');
+                                await adminSetAviatorOverride(aviatorCurrentRoundId, m);
+                                setActionSuccess(`Aviator Round #${aviatorCurrentRoundId} crash target locked to ${m}x!`);
+                                setTimeout(() => setActionSuccess(null), 3000);
+                              }}
+                              className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition ${
+                                aviatorCrashPoint === m
+                                  ? 'bg-amber-400 text-gray-950 font-black'
+                                  : 'bg-gray-900 border border-gray-800 text-gray-300 hover:border-amber-400'
+                              }`}
+                            >
+                              {m}x
+                            </button>
+                          ))}
+                          {aviatorPhase === 'flying' && (
+                            <button
+                              onClick={async () => {
+                                triggerHaptic('heavy');
+                                await adminEmergencyCrashNow();
+                                setActionSuccess('Active flight crashed immediately!');
+                                setTimeout(() => setActionSuccess(null), 3000);
+                              }}
+                              className="px-2 py-0.5 rounded bg-rose-600 hover:bg-rose-500 text-white font-black text-[10px] uppercase whitespace-nowrap"
+                            >
+                              Crash Now
+                            </button>
+                          )}
                         </div>
                       </div>
                     </div>
